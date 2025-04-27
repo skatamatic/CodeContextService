@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34701.34
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CodeContextService", "CodeContextService\CodeContextService.csproj", "{BF0ECC64-4A95-4608-A559-435EE5FA9B65}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RoslynTools", "RoslynTools\RoslynTools.csproj", "{A500C117-0D56-448B-AE69-F6387A8BAE10}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BF0ECC64-4A95-4608-A559-435EE5FA9B65}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BF0ECC64-4A95-4608-A559-435EE5FA9B65}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BF0ECC64-4A95-4608-A559-435EE5FA9B65}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BF0ECC64-4A95-4608-A559-435EE5FA9B65}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A500C117-0D56-448B-AE69-F6387A8BAE10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A500C117-0D56-448B-AE69-F6387A8BAE10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A500C117-0D56-448B-AE69-F6387A8BAE10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A500C117-0D56-448B-AE69-F6387A8BAE10}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {326DD621-2784-45AF-8D1D-C4C726DB81C8}
+	EndGlobalSection
+EndGlobal

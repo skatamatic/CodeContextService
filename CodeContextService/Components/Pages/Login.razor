@@ -1,0 +1,90 @@
+﻿@page "/login"
+@using CodeContextService.Model
+@using Microsoft.AspNetCore.Authorization
+@attribute [AllowAnonymous]
+@inject CodeContextService.Services.AuthService AuthService
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<h3>Log in</h3>
+
+<div class="mb-3">
+    <label for="user">Username</label>
+    <input id="user"
+           class="form-control"
+           @bind="_model.Username"
+           @bind:event="oninput" />
+</div>
+
+<div class="mb-3">
+    <label for="pass">Password</label>
+    <input id="pass"
+           type="password"
+           class="form-control"
+           @bind="_model.Password"
+           @bind:event="oninput" />
+</div>
+
+<button type="button"
+        class="btn btn-primary"
+        @onclick="HandleLogin"
+        disabled="@_isLoading">
+    @if (_isLoading)
+    {
+        <span>Logging in…</span>
+    }
+    else
+    {
+        <span>Log In</span>
+    }
+</button>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="text-danger mt-2">@_error</div>
+}
+
+@code {
+    private LoginRequest _model = new();
+    private bool _isLoading;
+    private string? _error;
+
+    private async Task HandleLogin()
+    {
+        _error = null;
+
+        // quick client‐side check
+        if (string.IsNullOrWhiteSpace(_model.Username) ||
+            string.IsNullOrWhiteSpace(_model.Password))
+        {
+            _error = "Username and password are required.";
+            return;
+        }
+
+        _isLoading = true;
+        try
+        {
+            var success = await AuthService.LoginAsync(
+                _model.Username,
+                _model.Password
+            );
+
+            if (success)
+            {
+                Nav.NavigateTo("/pr-analyze");
+            }
+            else
+            {
+                _error = "Invalid username or password.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Login failed: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+}

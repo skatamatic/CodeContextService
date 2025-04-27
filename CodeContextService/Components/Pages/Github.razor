@@ -1,0 +1,307 @@
+﻿@page "/github"
+@using Microsoft.AspNetCore.Authorization
+@using CodeContextService.Services
+@inject GitHubIntegrationService GitHub
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<HeadContent>
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-diff.min.js"></script>
+    <script>
+        // Highlighting helper
+        window.highlight = el => Prism.highlightElement(el);
+
+        // Read cookie by name
+        window.getCookieByName = name => {
+            const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+            return match ? decodeURIComponent(match[2]) : null;
+        };
+
+        // Write cookie (1 year)
+        window.setCookie = (name, value) => {
+            document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}`;
+        };
+    </script>
+</HeadContent>
+
+<PageTitle>GitHub Integration</PageTitle>
+
+<div class="container py-4">
+    <h3>GitHub PR Tools</h3>
+
+    <!-- TOKEN -->
+    <div class="mb-3">
+        <label class="form-label fw-bold">Personal‑Access‑Token (PAT)</label>
+        <input type="password"
+               value="@Token"
+               @oninput="@(e => OnFieldChanged("Token", e.Value?.ToString()))"
+               class="form-control"
+               placeholder="ghp_…"
+               disabled="@IsBusy" />
+    </div>
+    <button class="btn btn-outline-info mb-4"
+            @onclick="TestToken"
+            disabled="@IsBusy">
+        Test Token
+    </button>
+    <div class="alert alert-success" role="alert" hidden="@(!TokenOk)">✅ Token valid</div>
+    <div class="alert alert-danger" role="alert" hidden="@(!TokenFail)">❌ Token invalid</div>
+
+    <!-- PR fields -->
+    <div class="row g-3">
+        <div class="col-md-4">
+            <input value="@Owner"
+                   @oninput="@(e => OnFieldChanged("Owner", e.Value?.ToString()))"
+                   class="form-control"
+                   placeholder="owner"
+                   disabled="@IsBusy" />
+        </div>
+        <div class="col-md-4">
+            <input value="@Repo"
+                   @oninput="@(e => OnFieldChanged("Repo", e.Value?.ToString()))"
+                   class="form-control"
+                   placeholder="repo"
+                   disabled="@IsBusy" />
+        </div>
+        <div class="col-md-2">
+            <input type="number"
+                   value="@PrNumber"
+                   @oninput="OnPrNumberChanged"
+                   class="form-control"
+                   placeholder="PR #"
+                   min="1"
+                   disabled="@IsBusy" />
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="mt-3">
+        <button class="btn btn-primary me-2"
+                @onclick="FetchDiff"
+                disabled="@DisableActions">
+            Fetch Diff
+        </button>
+        <button class="btn btn-secondary"
+                @onclick="CloneRepo"
+                disabled="@DisableActions">
+            Clone Repo
+        </button>
+    </div>
+
+    <!-- Log -->
+    <div class="mt-4">
+        @foreach (var line in Log)
+        {
+            <div style="white-space: pre-wrap">@line</div>
+        }
+    </div>
+
+    <!-- Diff Summary -->
+    @if (FileDiffs.Any())
+    {
+        <div class="mt-5">
+            <h4>
+                Summary&nbsp;
+                <span class="badge bg-success">+@TotalAdded</span>
+                <span class="badge bg-danger ms-1">‑@TotalRemoved</span>
+            </h4>
+        </div>
+
+        @foreach (var file in FileDiffs)
+        {
+            var expanded = ExpandedFiles.Contains(file.FileName);
+            <div class="card mb-3 shadow-sm">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center"
+                     style="cursor:pointer"
+                     @onclick="() => ToggleFile(file.FileName)">
+                    <span>
+                        <span class="fw-bold">@file.FileName</span>
+                        <span class="badge bg-success ms-2">+@file.Added</span>
+                        <span class="badge bg-danger ms-1">‑@file.Removed</span>
+                    </span>
+                    <span class="text-muted">@((expanded) ? "▲" : "▼")</span>
+                </div>
+                @if (expanded)
+                {
+                    <div class="card-body p-0">
+                        <pre class="m-0"><code class="language-diff" @ref="file.CodeElement">@file.DiffText</code></pre>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    // UI-bound fields
+    private string Token { get; set; }
+    private string Owner { get; set; }
+    private string Repo { get; set; }
+    private int PrNumber { get; set; }
+
+    // State
+    private bool IsBusy;
+    private bool TokenOk;
+    private bool TokenFail;
+    private int TotalAdded;
+    private int TotalRemoved;
+    private List<FileDiff> FileDiffs { get; } = new();
+    private HashSet<string> ExpandedFiles { get; } = new();
+    private List<string> Log { get; } = new();
+    private bool DisableActions => IsBusy || !TokenOk || string.IsNullOrWhiteSpace(Owner)
+                                 || string.IsNullOrWhiteSpace(Repo) || PrNumber <= 0;
+
+    // guard to load cookies only once after JS is available
+    private bool _cookiesLoaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_cookiesLoaded)
+        {
+            // Load from cookies now that JS interop is enabled
+            Token = await JS.InvokeAsync<string>("getCookieByName", "Token") ?? Token;
+            Owner = await JS.InvokeAsync<string>("getCookieByName", "Owner") ?? Owner;
+            Repo = await JS.InvokeAsync<string>("getCookieByName", "Repo") ?? Repo;
+            var prCookie = await JS.InvokeAsync<string>("getCookieByName", "PrNumber");
+            if (int.TryParse(prCookie, out var prVal)) PrNumber = prVal;
+
+            _cookiesLoaded = true;
+            StateHasChanged();
+        }
+
+        // Highlight expanded diffs
+        foreach (var f in FileDiffs.Where(d => ExpandedFiles.Contains(d.FileName)))
+        {
+            if (f.CodeElement is not null && !f.Highlighted)
+            {
+                await JS.InvokeVoidAsync("highlight", f.CodeElement);
+                f.Highlighted = true;
+            }
+        }
+    }
+
+    // Persist text fields
+    private async Task OnFieldChanged(string fieldName, string newValue)
+    {
+        switch (fieldName)
+        {
+            case "Token": Token = newValue; break;
+            case "Owner": Owner = newValue; break;
+            case "Repo": Repo = newValue; break;
+        }
+        await JS.InvokeVoidAsync("setCookie", fieldName, newValue);
+    }
+
+    // Persist PR number
+    private async Task OnPrNumberChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var v))
+        {
+            PrNumber = v;
+            await JS.InvokeVoidAsync("setCookie", "PrNumber", v.ToString());
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("setCookie", "PrNumber", string.Empty);
+        }
+    }
+
+    // Token validation
+    private async Task TestToken()
+    {
+        SetBusy(true);
+        TokenOk = TokenFail = false;
+        TokenOk = await GitHub.ValidateTokenAsync(Token);
+        TokenFail = !TokenOk;
+        SetBusy(false);
+    }
+
+    // Fetch diff
+    private async Task FetchDiff()
+    {
+        try
+        {
+            StartOp("Fetching diff…");
+            var raw = await GitHub.GetPullRequestDiffAsync(Token, Owner, Repo, PrNumber);
+            ParseUnifiedDiff(raw);
+            EndOp("Diff loaded.");
+        }
+        catch (Exception ex) { EndOp($"❌ {ex.Message}"); }
+    }
+
+    // Clone repo
+    private async Task CloneRepo()
+    {
+        try
+        {
+            StartOp("Cloning repository…");
+            var path = await GitHub.CloneRepository(Token, Owner, Repo);
+            EndOp($"Cloned to {path}");
+        }
+        catch (Exception ex) { EndOp($"❌ {ex.Message}"); }
+    }
+
+    // Parse unified diff text
+    private void ParseUnifiedDiff(string diff)
+    {
+        FileDiffs.Clear();
+        TotalAdded = TotalRemoved = 0;
+        FileDiff current = null;
+
+        foreach (var line in diff.Split('\n'))
+        {
+            if (line.StartsWith("diff --git"))
+            {
+                if (current != null) FileDiffs.Add(current);
+                var parts = line.Split(' ');
+                var filePath = parts[^1][2..];
+                current = new FileDiff { FileName = filePath };
+                continue;
+            }
+            if (current == null) continue;
+
+            if (line.StartsWith("+") && !line.StartsWith("+++")) { current.Added++; TotalAdded++; }
+            else if (line.StartsWith("-") && !line.StartsWith("---")) { current.Removed++; TotalRemoved++; }
+
+            current.DiffLines.Add(line);
+        }
+        if (current != null) FileDiffs.Add(current);
+
+        foreach (var f in FileDiffs)
+        {
+            f.DiffText = string.Join('\n', f.DiffLines);
+            f.CodeElement = null;
+            f.Highlighted = false;
+        }
+
+        ExpandedFiles.Clear();
+        StateHasChanged();
+    }
+
+    // Toggle expand/collapse
+    private void ToggleFile(string file)
+    {
+        if (!ExpandedFiles.Add(file)) ExpandedFiles.Remove(file);
+        StateHasChanged();
+    }
+
+    // Logging helpers
+    private void StartOp(string m) { SetBusy(true); Log.Add(m); }
+    private void EndOp(string m) { Log.Add(m); SetBusy(false); }
+    private void SetBusy(bool b) { IsBusy = b; StateHasChanged(); }
+
+    // FileDiff helper class
+    private class FileDiff
+    {
+        public string? FileName;
+        public int Added;
+        public int Removed;
+        public List<string> DiffLines { get; } = new();
+        public string DiffText { get; set; }
+        public ElementReference? CodeElement;
+        public bool Highlighted;
+    }
+}

@@ -1,0 +1,103 @@
+﻿@namespace CodeContextService.Components.Views
+@using CodeContextService.Components.ViewModels
+@using RoslynTools.Analyzer
+@using Microsoft.AspNetCore.Components
+@inject IJSRuntime JS
+
+@if (!_highlighted)
+{
+    <div class="d-flex justify-content-center align-items-center" style="height: 200px;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="definitions-container">
+        @foreach (var def in Definitions)
+        {
+            var key = $"{def.SourceFile}|{def.FullName}";
+            var isExpanded = _expanded.Contains(key);
+
+            var totalLines = def.Code?.Trim().Split('\n').Length ?? 0;
+            var needsOverlay = totalLines > 20;
+
+            <div class="card mb-3 shadow-sm">
+                <!-- Header -->
+                <div class="card-header bg-light d-flex justify-content-between align-items-end"
+                     style="position: sticky; top: 0; z-index: 1030; background: #fff; padding-right: 0;">
+                    <div>
+                        <strong>@def.Symbol</strong><br />
+                        <small class="text-muted">@def.Namespace</small>
+                    </div>
+                    <div>
+                        <small class="text-info me-0">@Path.GetFileName(def.SourceFile)</small>
+                    </div>
+                </div>
+
+                <!-- Body -->
+                <!-- Code container with fade overlay -->
+                <div style="max-height:@(isExpanded ? "none" : "calc(1.2em * 20)"); overflow:hidden; position:relative; transition:max-height 0.3s ease;">
+                    <pre class="m-0"><code class="language-csharp">@def.Code</code></pre>
+                    @if (needsOverlay)
+                    {
+                        <!-- fade-out gradient for code -->
+                        <div style="position:absolute; bottom:0; width:100%; height:calc(1.2em * 2); background:linear-gradient(rgba(39,40,34,0), #272822); pointer-events:none; z-index:1010;"></div>
+                    }
+                </div>
+
+                @if (needsOverlay)
+                {
+                    <!-- solid background for button -->
+                    <div style="position:@(isExpanded ? "sticky" : "absolute"); bottom:0; width:100%; left:0; background:#272822; padding:0.5em; text-align:right; z-index:1020;">
+                        <button class="btn btn-sm btn-link p-0 text-white" style="opacity:0.85;" @onclick="() => ToggleExpand(key)">
+                            @(isExpanded ? "Show less ▲" : "Show more ▼")
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    HashSet<string> _expanded = new();
+    
+
+    [Parameter]
+    public IEnumerable<DefinitionDisplayModel> Definitions { get; set; } = Enumerable.Empty<DefinitionDisplayModel>();
+
+    protected override void OnParametersSet()
+    {
+        _highlightCount = 0;
+        _highlighted = false;
+    }
+
+    bool _highlighted;
+    int _highlightCount = 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await DoHighlight();
+    }
+
+    private async Task DoHighlight()
+    {
+        if (_highlightCount < 10)
+        {
+            await JS.InvokeVoidAsync("Prism.highlightAll");
+            _highlightCount++;
+            _highlighted = true;
+            StateHasChanged();
+        }
+    }
+
+    void ToggleExpand(string key)
+    {
+        if (_expanded.Contains(key)) _expanded.Remove(key);
+        else _expanded.Add(key);
+
+        _highlightCount = 0;
+    }
+}
