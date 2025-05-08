@@ -29,7 +29,7 @@ public abstract class FinderServiceBase : IDisposable
     // ────────────────────────────────────────────────────────────────────────────────
     // Instance state                                                                  
     // ────────────────────────────────────────────────────────────────────────────────
-    private readonly Action<string> _log;
+    protected readonly Action<string> _log;
     private readonly Dictionary<string, (Solution Solution, MSBuildWorkspace WS)> _solutionCache = new(StringComparer.OrdinalIgnoreCase);
 
     // ────────────────────────────────────────────────────────────────────────────────

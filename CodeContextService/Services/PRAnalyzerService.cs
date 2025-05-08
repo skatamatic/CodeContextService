@@ -3,6 +3,13 @@ using CodeContextService.Model;
 
 namespace CodeContextService.Services;
 
+public enum DefinitionAnalysisMode
+{
+    Full,
+    Minified,
+    MinifiedExplain
+}
+
 public class PRAnalyzerService
 {
     readonly DefinitionFinderService referenceFinder;
@@ -18,6 +25,8 @@ public class PRAnalyzerService
         string owner, 
         string repo, 
         int prNumber, 
+        int depth,
+        DefinitionAnalysisMode mode,
         Action<string>? log = null)
     {
         log ??= (_ => { });
@@ -38,7 +47,14 @@ public class PRAnalyzerService
             log($"Analyzing {file.FileName}...");
             try
             {
-                var results = await referenceFinder.FindAllDefinitionsAsync(Path.Combine(path, file.FileName), 1);
+
+                IEnumerable<DefinitionResult> results = mode switch
+                {
+                    DefinitionAnalysisMode.Full => await referenceFinder.FindAllDefinitionsAsync(Path.Combine(path, file.FileName), depth),
+                    DefinitionAnalysisMode.Minified => await referenceFinder.FindMinimalDefinitionsAsync(Path.Combine(path, file.FileName), depth),
+                    DefinitionAnalysisMode.MinifiedExplain => await referenceFinder.FindMinimalDefinitionsAsync(Path.Combine(path, file.FileName), depth, ExplainMode.ReasonForInclusion),
+                };
+                    
                 var flat = results.SelectMany(r => r.Definitions.Values);
                 definitionMap[file.FileName] = flat;
                 log($"Found {flat.Count()} definitions");

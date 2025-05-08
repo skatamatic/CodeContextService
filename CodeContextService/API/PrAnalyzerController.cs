@@ -1,6 +1,8 @@
 ﻿using CodeContextService.Services;
 using Microsoft.AspNetCore.Http;
 using CodeContextService.Model;
+using System.IO;
+using Microsoft.CodeAnalysis;
 
 namespace CodeContextService.API;
 
@@ -8,7 +10,9 @@ public record AnalysisRequest(
     string Token,
     string Owner,
     string Repo,
-    int PrNumber
+    int PrNumber,
+    int Depth,
+    string Mode
 );
 
 public static class PrAnalyzerEndpoints
@@ -29,8 +33,10 @@ public static class PrAnalyzerEndpoints
         var logs = new List<string>();
         try
         {
+            var mode = string.IsNullOrEmpty(req.Mode) ? DefinitionAnalysisMode.Full : Enum.Parse<DefinitionAnalysisMode>(req.Mode);
+            int depth = Math.Clamp(req.Depth, 1, 10);
             var result = await analyzer.RunAnalysis(
-                req.Token, req.Owner, req.Repo, req.PrNumber, msg => logs.Add(msg)
+                req.Token, req.Owner, req.Repo, req.PrNumber, req.Depth, mode, msg => logs.Add(msg)
             );
             return Results.Ok(new { Logs = logs, Result = result });
         }

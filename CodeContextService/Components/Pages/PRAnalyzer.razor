@@ -32,25 +32,16 @@
 
     <script>
         window.updateStickyOffset = () => {
-            // 1) measure search-bar
             const searchEl = document.querySelector('.filter-container');
-            const searchH = searchEl
-                ? searchEl.getBoundingClientRect().height
-                : 0;
-            document.documentElement
-                .style
-                .setProperty('--search-bar-height', `${searchH}px`);
+            const searchH = searchEl ? searchEl.getBoundingClientRect().height : 0;
+            document.documentElement.style.setProperty('--search-bar-height', `${searchH}px`);
 
-            // 2) measure file-header
             const fileHdr = document.querySelector('.card.expanded > .card-header');
             if (fileHdr) {
                 const fileH = fileHdr.getBoundingClientRect().height;
-                document.documentElement
-                    .style
-                    .setProperty('--file-header-height', `${fileH}px`);
+                document.documentElement.style.setProperty('--file-header-height', `${fileH}px`);
             }
         };
-
         window.addEventListener('load', updateStickyOffset);
         window.addEventListener('resize', updateStickyOffset);
     </script>
@@ -59,19 +50,12 @@
         window.scrollIfStuck = (id, wasExpandedBefore) => {
             const el = document.getElementById(id);
             if (!el || !wasExpandedBefore) return;
-
-            // measure how tall your sticky bars are
             const rootStyles = getComputedStyle(document.documentElement);
             const searchH = parseFloat(rootStyles.getPropertyValue('--search-bar-height')) || 0;
             const fileH = parseFloat(rootStyles.getPropertyValue('--file-header-height')) || 0;
             const totalOffset = searchH + fileH;
-
-            // where is the header now relative to the viewport?
             const rect = el.getBoundingClientRect();
-
-            // if it's flush or above the top of the viewport, scroll it down
             if (rect.top <= totalOffset + 1) {
-                // compute the absolute scroll position we want
                 const targetY = window.pageYOffset + rect.top - totalOffset - 1;
                 window.scrollTo({ top: targetY, left: 0, behavior: 'auto' });
             }
@@ -112,10 +96,38 @@
         </div>
     </div>
 
+    <!-- Analysis Mode (row) -->
+    <div class="row mb-3">
+        <div class="col" style="width:15%">
+            <select class="form-select"
+                    @bind="SelectedMode"
+                    disabled="@IsBusy"
+                    style="width:100%">
+                <option value="Full">Full Analysis</option>
+                <option value="Minified">Minified</option>
+                <option value="MinifiedExplain">Minified + Explain</option>
+            </select>
+        </div>
+        <div class="col" style="width:15%">
+            <input type="number" class="form-control"
+                   value="@Depth"
+                   oninput="OnDepthChanged"
+                   disabled="@IsBusy"
+                   placeholder="Depth"
+                   min="0"
+                   style="width:100%" />
+        </div>
+        <div class="col">
+            <!-- spacer -->
+        </div>
+    </div>
+
+    <!-- Actions -->
     <button class="btn btn-outline-info me-2" @onclick="TestToken" disabled="@IsBusy">Test Token</button>
     <button class="btn btn-primary me-2" @onclick="RunAnalysis" disabled="@DisableActions">Analyze PR</button>
     <button class="btn btn-secondary" @onclick="ToggleLogs">@(LogsExpanded ? "Hide Logs ▲" : "Show Logs ▼")</button>
 
+    <!-- Token Status -->
     <div class="mt-3">
         <div class="alert alert-success" role="alert" hidden="@(!TokenOk)">✅ Token valid</div>
         <div class="alert alert-danger" role="alert" hidden="@(!TokenFail)">❌ Token invalid</div>
@@ -129,7 +141,6 @@
             <div id="logsContainer"
                  class="border rounded p-2"
                  style="max-height:@(LogsExpanded ? "300px" : "auto");overflow-y:@(LogsExpanded ? "auto" : "visible");transition:max-height 0.3s;">
-
                 <ul class="mb-0">
                     @foreach (var line in Log)
                     {
@@ -142,23 +153,19 @@
 
     <br />
 
-    <!-- busy‐spinner -->
+    <!-- Busy Spinner -->
     @if (IsBusy)
     {
-        <div class="d-flex justify-content-center align-items-center" style="height: 200px;">
-            <div class="text-center">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Analyzing…</span>
-                </div>
-                <div class="mt-2">
-                    @* Optional: show your last log entry here *@
-                    <em>@(Log.Any() ? Log.Last() : "Starting analysis…")</em>
-                </div>
+        <div class="d-flex justify-content-center align-items-center" style="height:200px;">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Analyzing…</span>
             </div>
+            <div class="mt-2"><em>@(Log.Any() ? Log.Last() : "Starting analysis…")</em></div>
         </div>
     }
-    <!-- end busy‐spinner -->
-    @if (!IsBusy && FileDiffs != null && FileDiffs.Count > 0)
+
+    <!-- Results -->
+    @if (!IsBusy && FileDiffs.Any())
     {
         <h4>Analysis Results</h4>
         <div class="mb-4 filter-container">
@@ -169,57 +176,45 @@
                    disabled="@IsBusy" />
         </div>
 
-        @foreach (var file in FileDiffs.Where(f => f.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-                                       .Where(f => string.IsNullOrWhiteSpace(DefFilter) || (AnalysisResults.ContainsKey(f.FileName) && AnalysisResults[f.FileName]
-                                       .Any(d => d.FullName
-                                       .Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))))
+        @foreach (var file in FileDiffs
+       .Where(f => f.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+       .Where(f => string.IsNullOrWhiteSpace(DefFilter)
+       || (AnalysisResults.ContainsKey(f.FileName)
+       && AnalysisResults[f.FileName]
+       .Any(d => d.FullName.Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))))
         {
-            var fileKey = file.FileName;
+            var fileKey = file.FileName!;
             var isFileExpanded = ExpandedFiles.Contains(fileKey);
             <div class="card mb-3 shadow-sm @(isFileExpanded ? "expanded" : "")">
-            <div id="fileHeader-@fileKey"
-                  class="card-header d-flex justify-content-between"
-                     style="cursor: pointer;"
+                <div id="fileHeader-@fileKey"
+                     class="card-header d-flex justify-content-between"
+                     style="cursor:pointer"
                      @onclick="async () => { await ToggleFile(fileKey); }">
                     <strong>@file.FileName</strong>
                     <span>
                         <span class="badge bg-success me-1">+@file.Added</span>
                         <span class="badge bg-danger me-1">-@file.Removed</span>
-                        <span class="ms-2">@(isFileExpanded ? "▲" : "▼")</span>
+                        <span class="ms-2">@((isFileExpanded) ? "▲" : "▼")</span>
                     </span>
                 </div>
                 @if (isFileExpanded)
                 {
                     <div class="card-body">
-                        @{
-                            var diffKey = "diff";
-                            var isDiffExpanded = ExpandedDefs.Contains(diffKey);
-                            <div class="card mb-2 @(isDiffExpanded ? "expanded" : "")">
-                                <div class="card-header"
-                                     style="cursor: pointer;"
-                                     @onclick="async () => { await ToggleDef(diffKey);}">
-                                    <b>Diff</b>
-                                    <span class="ms-2 text-muted">@(isDiffExpanded ? "▲" : "▼")</span>
-                                </div>
-                                @if (isDiffExpanded)
-                                {
-                                    <div class="card-body p-2">
-                                        <pre><code class="language-diff">@string.Join("\n", file.DiffLines)</code></pre>
-                                    </div>
-                                }
-                            </div>
-                        }
-                        @foreach (var def in AnalysisResults!.GetValueOrDefault(file.FileName, Array.Empty<DefinitionDisplayModel>())
-                            .Where(d => string.IsNullOrWhiteSpace(DefFilter) || d.FullName!.Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))
+                        @* Diff view omitted *@
+
+                        @foreach (var def in AnalysisResults.GetValueOrDefault(file.FileName!, Array.Empty<DefinitionDisplayModel>())
+                       .Where(d => string.IsNullOrWhiteSpace(DefFilter)
+                       || d.FullName.Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))
                         {
-                            var defKey = file.FileName + "|" + def.FullName;
+                            var defKey = $"{file.FileName}|{def.FullName}";
                             var isDefExpanded = ExpandedDefs.Contains(defKey);
                             <div class="card mb-2 @(isDefExpanded ? "expanded" : "")">
-                                <div class="card-header" id="defHeader-@Uri.EscapeDataString(defKey)"
-                                     style="cursor: pointer;"
-                                     @onclick="async () => { await ToggleDef(defKey);}">
+                                <div class="card-header"
+                                     id="defHeader-@Uri.EscapeDataString(defKey)"
+                                     style="cursor:pointer"
+                                     @onclick="async () => { await ToggleDef(defKey); }">
                                     <b>Definition:</b> @def.FullName
-                                    <span class="ms-2 text-muted">@(isDefExpanded ? "▲" : "▼")</span>
+                                    <span class="ms-2">@((isDefExpanded) ? "▲" : "▼")</span>
                                 </div>
                                 @if (isDefExpanded)
                                 {
@@ -237,28 +232,29 @@
 </div>
 
 @code {
-    string? Token;
+    // Persisted inputs
     string? Owner;
     string? Repo;
     int PrNumber;
+    int Depth = 2;
+    string? Token;
+    DefinitionAnalysisMode SelectedMode { get; set; } = DefinitionAnalysisMode.Minified;
 
+    // UI state
     bool IsBusy;
     bool TokenOk;
     bool TokenFail;
     List<string> Log { get; } = new();
     bool LogsExpanded;
     bool CookiesLoaded;
-    HashSet<string> ExpandedFiles { get; } = new();
-    HashSet<string> ExpandedDefs { get; } = new();
-
     List<FileDiff> FileDiffs { get; } = new();
-    Dictionary<string, ViewModels.DefinitionDisplayModel[]> AnalysisResults { get; } = new();
-
+    Dictionary<string, DefinitionDisplayModel[]> AnalysisResults { get; } = new();
     bool DisableActions => IsBusy || !TokenOk
-                                   || string.IsNullOrWhiteSpace(Owner)
-                                   || string.IsNullOrWhiteSpace(Repo)
-                                   || PrNumber <= 0;
+                           || string.IsNullOrWhiteSpace(Owner)
+                           || string.IsNullOrWhiteSpace(Repo)
+                           || PrNumber <= 0;
 
+    // Filter
     string _defFilter = string.Empty;
     string DefFilter
     {
@@ -271,25 +267,23 @@
         }
     }
 
-    private void UpdateFilterExpansion()
-    {
+    HashSet<string> ExpandedFiles { get; } = new();
+    HashSet<string> ExpandedDefs { get; } = new();
 
-        // if there’s a filter, expand any file that has at least one matching definition
+    void UpdateFilterExpansion()
+    {
         if (!string.IsNullOrWhiteSpace(_defFilter))
         {
-            // reset everything
             ExpandedFiles.Clear();
-
-            foreach (var file in FileDiffs)
+            foreach (var f in FileDiffs)
             {
-                if (AnalysisResults.TryGetValue(file.FileName!, out var defs) &&
-                    defs.Any(d => d.FullName!.Contains(_defFilter, StringComparison.OrdinalIgnoreCase)))
+                if (AnalysisResults.TryGetValue(f.FileName!, out var defs)
+                    && defs.Any(d => d.FullName.Contains(_defFilter, StringComparison.OrdinalIgnoreCase)))
                 {
-                    ExpandedFiles.Add(file.FileName!);
+                    ExpandedFiles.Add(f.FileName!);
                 }
             }
         }
-
         StateHasChanged();
     }
 
@@ -301,29 +295,31 @@
             Repo = await JS.InvokeAsync<string>("getCookieByName", "Repo") ?? Repo;
             Token = await JS.InvokeAsync<string>("getCookieByName", "Token") ?? Token;
             var pr = await JS.InvokeAsync<string>("getCookieByName", "PrNumber");
-            if (int.TryParse(pr, out var prVal)) PrNumber = prVal;
+            if (int.TryParse(pr, out var p)) PrNumber = p;
+            var modeC = await JS.InvokeAsync<string>("getCookieByName", "AnalysisMode");
+            if (Enum.TryParse(modeC, true, out DefinitionAnalysisMode m)) SelectedMode = m;
             CookiesLoaded = true;
             StateHasChanged();
         }
         await JS.InvokeVoidAsync("highlight");
     }
 
-    private async Task OnFieldChanged(string field, string? value)
+    private async Task OnFieldChanged(string field, string? val)
     {
-        value ??= string.Empty;
+        val ??= string.Empty;
         switch (field)
         {
-            case "Owner": Owner = value; break;
-            case "Repo": Repo = value; break;
-            case "Token": Token = value; break;
+            case "Owner": Owner = val; break;
+            case "Repo": Repo = val; break;
+            case "Token": Token = val; break;
         }
-        await JS.InvokeVoidAsync("setCookie", field, value);
+        await JS.InvokeVoidAsync("setCookie", field, val);
     }
 
     private async Task OnPrNumberChanged(ChangeEventArgs e)
     {
-        var text = e.Value?.ToString();
-        PrNumber = int.TryParse(text, out var num) ? num : 0;
+        var s = e.Value?.ToString();
+        PrNumber = int.TryParse(s, out var v) ? v : 0;
         await JS.InvokeVoidAsync("setCookie", "PrNumber", PrNumber.ToString());
     }
 
@@ -340,70 +336,44 @@
     private async Task RunAnalysis()
     {
         IsBusy = true;
-        Log.Clear(); 
-        AnalysisResults.Clear();
+        Log.Clear();
         FileDiffs.Clear();
-        try
-        {
-            var result = await Analyzer.RunAnalysis(Token, Owner, Repo, PrNumber, async msg => await InvokeAsync(() => AddLog(msg)));
-
-            FileDiffs.AddRange(result.FileDiffs!);
-            foreach (var item in result.DefinitionMap!)
-            {
-                AnalysisResults[item.Key] = item.Value.Select(x => new DefinitionDisplayModel { FullName = x.FullName, Code = x.Code }).ToArray();
-            }
-        }
-        catch (Exception ex)
-        {
-            await AddLog($"❌ {ex.Message}");
-        }
-        finally 
-        { 
-            IsBusy = false; 
-            StateHasChanged(); 
-        }
-    }
-
-    private void ToggleLogs() => LogsExpanded = !LogsExpanded;
-
-    private async Task ToggleFile(string key)
-    {
-        // remember whether we're collapsing
-        var wasExpanded = ExpandedFiles.Contains(key);
-        if (wasExpanded)
-            ExpandedFiles.Remove(key);
-        else
-            ExpandedFiles.Add(key);
-
-        // recalc the CSS offsets for sticky
-        await JS.InvokeVoidAsync("updateStickyOffset");
-        // then, if we just collapsed, scroll back up if it was stuck
-        await JS.InvokeVoidAsync("scrollIfStuck", $"fileHeader-{key}", wasExpanded);
-    }
-
-    private async Task ToggleDef(string key)
-    {
-        var wasExpanded = ExpandedDefs.Contains(key);
-        if (wasExpanded)
-            ExpandedDefs.Remove(key);
-        else
-            ExpandedDefs.Add(key);
-
-        await JS.InvokeVoidAsync("updateStickyOffset");
-        await JS.InvokeVoidAsync("scrollIfStuck", $"defHeader-{Uri.EscapeDataString(key)}", wasExpanded);
-    }
-
-    private async Task AddLog(string msg)
-    {
-        Log.Add(msg);
+        AnalysisResults.Clear();
         StateHasChanged();
-        try 
-        { 
-            await JS.InvokeVoidAsync("scrollToBottom", "logsContainer"); 
-        }
-        catch
+
+        var result = await Analyzer.RunAnalysis(
+            Token, Owner!, Repo!, PrNumber, Depth, SelectedMode,
+            async msg => { Log.Add(msg); await InvokeAsync(StateHasChanged); }
+        );
+
+        FileDiffs.AddRange(result.FileDiffs!);
+        foreach (var kv in result.DefinitionMap!)
         {
-            // Can't log a log exception
+            AnalysisResults[kv.Key] = kv.Value
+                .Select(x => new DefinitionDisplayModel { FullName = x.FullName, Code = x.Code })
+                .ToArray();
         }
+
+        await JS.InvokeVoidAsync("setCookie", "AnalysisMode", SelectedMode.ToString());
+        IsBusy = false;
+        StateHasChanged();
+    }
+
+    void ToggleLogs() => LogsExpanded = !LogsExpanded;
+
+    async Task ToggleFile(string key)
+    {
+        var was = ExpandedFiles.Contains(key);
+        if (was) ExpandedFiles.Remove(key); else ExpandedFiles.Add(key);
+        await JS.InvokeVoidAsync("updateStickyOffset");
+        await JS.InvokeVoidAsync("scrollIfStuck", $"fileHeader-{key}", was);
+    }
+
+    async Task ToggleDef(string key)
+    {
+        var was = ExpandedDefs.Contains(key);
+        if (was) ExpandedDefs.Remove(key); else ExpandedDefs.Add(key);
+        await JS.InvokeVoidAsync("updateStickyOffset");
+        await JS.InvokeVoidAsync("scrollIfStuck", $"defHeader-{Uri.EscapeDataString(key)}", was);
     }
 }
