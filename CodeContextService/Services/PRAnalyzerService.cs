@@ -12,10 +12,10 @@ public enum DefinitionAnalysisMode
 
 public class PRAnalyzerService
 {
-    readonly DefinitionFinderService referenceFinder;
+    readonly DefinitionFinderServiceV2 referenceFinder;
     readonly GitHubIntegrationService github;
 
-    public PRAnalyzerService(GitHubIntegrationService github, DefinitionFinderService definitionFinder)
+    public PRAnalyzerService(GitHubIntegrationService github, DefinitionFinderServiceV2 definitionFinder)
     {
         this.referenceFinder = definitionFinder;
         this.github = github;

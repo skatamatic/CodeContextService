@@ -1,16 +1,16 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using CodeContextService.API;
 using CodeContextService.Components;
 using CodeContextService.Model;
 using CodeContextService.Services;
-using Microsoft.Build.Locator;
-using Microsoft.IdentityModel.Tokens;
-using RoslynTools.Analyzer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Build.Locator;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using RoslynTools.Analyzer;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -73,7 +73,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<GitHubIntegrationService>();
 builder.Services.AddScoped<PRAnalyzerService>();
 builder.Services.AddScoped(sp =>
-    new DefinitionFinderService(msg => Console.WriteLine($"[RF] {msg}"))
+    new DefinitionFinderServiceV2(msg => Console.WriteLine($"[RF] {msg}"))
 );
 MSBuildLocator.RegisterDefaults();
 

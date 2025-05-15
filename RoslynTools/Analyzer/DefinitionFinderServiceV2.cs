@@ -186,6 +186,9 @@ public sealed class DefinitionFinderServiceV2 : FinderServiceBase, IDefinitionFi
 
         foreach (var (type, members) in keep)
         {
+            if (type.DeclaringSyntaxReferences.Length == 0) 
+                continue; // no source location
+
             var firstRef = type.DeclaringSyntaxReferences[0];
             var firstTree = firstRef.SyntaxTree;
             var doc = solution.GetDocument(firstTree)!;
