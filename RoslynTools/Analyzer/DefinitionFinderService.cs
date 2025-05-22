@@ -347,5 +347,10 @@ public sealed class DefinitionFinderService : FinderServiceBase, IDefinitionFind
         return null;
     }
 
+    public Task<IReadOnlyCollection<DefinitionResult>> FindAggregatedMinimalDefinitionsAsync(IEnumerable<string> sourceFiles, int depth, ExplainMode explain = ExplainMode.None, bool excludeTargetSourceFileDefinitionsPerFile = false)
+    {
+        throw new NotImplementedException();
+    }
+
     #endregion
 }

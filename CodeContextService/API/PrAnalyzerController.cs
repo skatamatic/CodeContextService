@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Http;
 using CodeContextService.Model;
 using System.IO;
 using Microsoft.CodeAnalysis;
+using System.Text.Json.Serialization;
+using System.Text.Json;
 
 namespace CodeContextService.API;
 
@@ -38,7 +40,13 @@ public static class PrAnalyzerEndpoints
             var result = await analyzer.RunAnalysis(
                 req.Token, req.Owner, req.Repo, req.PrNumber, req.Depth, mode, msg => logs.Add(msg)
             );
-            return Results.Ok(new { Logs = logs, Result = result });
+
+            var jsonOptions = new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            };
+
+            return Results.Json(new { Logs = logs, Result = result }, jsonOptions);
         }
         catch (Exception ex)
         {
