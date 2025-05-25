@@ -130,7 +130,14 @@ public class PRAnalyzerService
         };
 
         // Cleanup
-        Directory.Delete(path, true);
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch (Exception ex)
+        {
+            log($"❌ Error deleting cloned repository: {ex.Message}");
+        }
 
         return analysisResult;
     }

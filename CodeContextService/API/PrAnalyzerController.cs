@@ -1,10 +1,4 @@
 ﻿using CodeContextService.Services;
-using Microsoft.AspNetCore.Http;
-using CodeContextService.Model;
-using System.IO;
-using Microsoft.CodeAnalysis;
-using System.Text.Json.Serialization;
-using System.Text.Json;
 
 namespace CodeContextService.API;
 
@@ -41,12 +35,7 @@ public static class PrAnalyzerEndpoints
                 req.Token, req.Owner, req.Repo, req.PrNumber, req.Depth, mode, msg => logs.Add(msg)
             );
 
-            var jsonOptions = new JsonSerializerOptions
-            {
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-            };
-
-            return Results.Json(new { Logs = logs, Result = result }, jsonOptions);
+            return Results.Ok(new { Logs = logs, Result = result });
         }
         catch (Exception ex)
         {
