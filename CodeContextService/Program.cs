@@ -75,7 +75,8 @@ builder.Services.AddScoped<PRAnalyzerService>();
 builder.Services.AddScoped(sp =>
     new DefinitionFinderServiceV2(msg => Console.WriteLine($"[RF] {msg}"))
 );
-MSBuildLocator.RegisterDefaults();
+
+MSBuildLocator.RegisterMSBuildPath(@"C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin");
 
 // 5) Swagger for testing
 builder.Services.AddEndpointsApiExplorer();

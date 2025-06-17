@@ -22,9 +22,8 @@ public class PRAnalyzerService
         this.github = github;
     }
 
-    public async Task<AnalysisResult> RunAnalysis(string token,
-        string owner,
-        string repo,
+    public async Task<AnalysisResult> RunAnalysis(
+        AdoConnectionString cs,
         int prNumber,
         int depth,
         DefinitionAnalysisMode mode,
@@ -34,28 +33,27 @@ public class PRAnalyzerService
 
         var definitionMap = new Dictionary<string, IEnumerable<Definition>>();
 
-        log($"Fetching PR details for owner {owner}, repo {repo}, PR #{prNumber} to determine branch.");
+        log($"Fetching PR details for org {cs.Org}, repo {cs.Repo}, PR #{prNumber} to determine branch.");
+
         string? prBranchName;
         try
         {
-            prBranchName = await github.GetPullRequestHeadBranchAsync(token, owner, repo, prNumber);
+            prBranchName = await github.GetPullRequestHeadBranchAsync(cs, prNumber);
             log($"Pull request #{prNumber} is from branch: '{prBranchName}'.");
         }
         catch (Exception ex)
         {
             log($"❌ Error fetching PR branch details: {ex.Message}. Cloning default branch instead.");
             prBranchName = null;
-            log($"Warning: Could not determine PR branch. Will attempt to clone default branch of '{repo}'.");
+            log($"Warning: Could not determine PR branch. Will attempt to clone default branch of '{cs.Repo}'.");
         }
 
-        log($"Cloning repository '{repo}' (branch: '{prBranchName ?? "default"}').");
-        // Pass the prBranchName to CloneRepository.
-        // The CloneRepository method in GitHubIntegrationService is already designed to use the 'branch' parameter.
-        var path = await github.CloneRepository(token, owner, repo, prBranchName);
+        log($"Cloning repository '{cs.Repo}' (branch: '{prBranchName ?? "default"}').");
+        var path = await github.CloneRepository(cs, prBranchName);
         log($"Cloned to {path}");
 
         log($"Fetching PR diff for PR #{prNumber}");
-        var raw = await github.GetPullRequestDiffAsync(token, owner, repo, prNumber);
+        var raw = await github.GetPullRequestDiffAsync(cs, prNumber);
         var diff = ParseUnifiedDiff(raw);
         log($"Fetched diff, files changed: {diff.Count()}");
 
@@ -85,7 +83,7 @@ public class PRAnalyzerService
         }
 
         var json = JsonConvert.SerializeObject(flatAggregate, Formatting.Indented);
-        log($"Flat analysis complete complete:\n{json}");
+        log($"Flat analysis complete:\n{json}");
 
         foreach (var file in diff.Where(f => f.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
         {
@@ -105,7 +103,8 @@ public class PRAnalyzerService
                     ),
                     DefinitionAnalysisMode.MinifiedExplain => await referenceFinder.FindMinimalDefinitionsAsync(
                         Path.Combine(path, file.FileName),
-                        depth, ExplainMode.ReasonForInclusion,
+                        depth,
+                        ExplainMode.ReasonForInclusion,
                         excludeTargetSourceFileDefinitions: omitSourceFile
                     ),
                     _ => throw new NotImplementedException(),
@@ -129,7 +128,6 @@ public class PRAnalyzerService
             MergedResults = aggregateResults
         };
 
-        // Cleanup
         try
         {
             Directory.Delete(path, true);
