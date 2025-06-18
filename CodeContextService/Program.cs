@@ -70,6 +70,8 @@ builder.Services
     .AddInteractiveServerComponents();
 
 builder.Services.AddHttpClient();
+builder.Services.AddScoped<AzureDevOpsIntegrationService>();
+builder.Services.AddScoped<SourceControlIntegrationService>();
 builder.Services.AddScoped<GitHubIntegrationService>();
 builder.Services.AddScoped<PRAnalyzerService>();
 builder.Services.AddScoped(sp =>

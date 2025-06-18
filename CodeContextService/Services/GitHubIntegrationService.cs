@@ -2,8 +2,9 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 
+namespace CodeContextService.Services;
 
-public class GitHubIntegrationService
+public class GitHubIntegrationService : ISourceControlIntegrationService
 {
     private readonly IHttpClientFactory _factory;
     private readonly ILogger<GitHubIntegrationService> _log;
@@ -24,7 +25,7 @@ public class GitHubIntegrationService
         return client;
     }
 
-    public Task<bool> ValidateTokenAsync(AdoConnectionString cs)
+    public Task<bool> ValidateTokenAsync(SourceControlConnectionString cs)
         => ValidateTokenAsync(cs.Token);
 
     private async Task<bool> ValidateTokenAsync(string token)
@@ -34,7 +35,7 @@ public class GitHubIntegrationService
         return resp.IsSuccessStatusCode;
     }
 
-    public async Task<string> GetPullRequestDiffAsync(AdoConnectionString cs, int prNumber)
+    public async Task<string> GetPullRequestDiffAsync(SourceControlConnectionString cs, int prNumber)
     {
         var client = CreateClient(cs.Token);
         var req = new HttpRequestMessage(HttpMethod.Get, $"repos/{cs.Org}/{cs.Repo}/pulls/{prNumber}");
@@ -45,7 +46,7 @@ public class GitHubIntegrationService
         return await resp.Content.ReadAsStringAsync();
     }
 
-    public async Task<string> GetPullRequestHeadBranchAsync(AdoConnectionString cs, int prNumber)
+    public async Task<string> GetPullRequestHeadBranchAsync(SourceControlConnectionString cs, int prNumber)
     {
         var client = CreateClient(cs.Token);
         var url = $"repos/{cs.Org}/{cs.Repo}/pulls/{prNumber}";
@@ -72,7 +73,7 @@ public class GitHubIntegrationService
         throw new InvalidOperationException($"Could not determine head branch for PR {prNumber}");
     }
 
-    public async Task<string> CloneRepository(AdoConnectionString cs, string? branch = null)
+    public async Task<string> CloneRepository(SourceControlConnectionString cs, string? branch = null)
     {
         var url = $"https://github.com/{cs.Org}/{cs.Repo}.git";
         var destDir = Path.Combine(Path.GetTempPath(), $"{cs.Repo}-{Guid.NewGuid()}");

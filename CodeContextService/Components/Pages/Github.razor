@@ -7,7 +7,7 @@
 
 <HeadContent>
     <link rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
+    href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-diff.min.js"></script>
     <script>
@@ -16,13 +16,13 @@
 
         // Read cookie by name
         window.getCookieByName = name => {
-            const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-            return match ? decodeURIComponent(match[2]) : null;
+        const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+        return match ? decodeURIComponent(match[2]) : null;
         };
 
         // Write cookie (1 year)
         window.setCookie = (name, value) => {
-            document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}`;
+        document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}`;
         };
     </script>
 </HeadContent>
@@ -36,15 +36,15 @@
     <div class="mb-3">
         <label class="form-label fw-bold">Personal‑Access‑Token (PAT)</label>
         <input type="password"
-               value="@Token"
-               @oninput="@(e => OnFieldChanged("Token", e.Value?.ToString()))"
-               class="form-control"
-               placeholder="ghp_…"
-               disabled="@IsBusy" />
+        value="@Token"
+        @oninput="@(e => OnFieldChanged("Token", e.Value?.ToString()))"
+        class="form-control"
+        placeholder="ghp_…"
+        disabled="@IsBusy" />
     </div>
     <button class="btn btn-outline-info mb-4"
-            @onclick="TestToken"
-            disabled="@IsBusy">
+    @onclick="TestToken"
+    disabled="@IsBusy">
         Test Token
     </button>
     <div class="alert alert-success" role="alert" hidden="@(!TokenOk)">✅ Token valid</div>
@@ -54,39 +54,39 @@
     <div class="row g-3">
         <div class="col-md-4">
             <input value="@Owner"
-                   @oninput="@(e => OnFieldChanged("Owner", e.Value?.ToString()))"
-                   class="form-control"
-                   placeholder="owner"
-                   disabled="@IsBusy" />
+            @oninput="@(e => OnFieldChanged("Owner", e.Value?.ToString()))"
+            class="form-control"
+            placeholder="owner"
+            disabled="@IsBusy" />
         </div>
         <div class="col-md-4">
             <input value="@Repo"
-                   @oninput="@(e => OnFieldChanged("Repo", e.Value?.ToString()))"
-                   class="form-control"
-                   placeholder="repo"
-                   disabled="@IsBusy" />
+            @oninput="@(e => OnFieldChanged("Repo", e.Value?.ToString()))"
+            class="form-control"
+            placeholder="repo"
+            disabled="@IsBusy" />
         </div>
         <div class="col-md-2">
             <input type="number"
-                   value="@PrNumber"
-                   @oninput="OnPrNumberChanged"
-                   class="form-control"
-                   placeholder="PR #"
-                   min="1"
-                   disabled="@IsBusy" />
+            value="@PrNumber"
+            @oninput="OnPrNumberChanged"
+            class="form-control"
+            placeholder="PR #"
+            min="1"
+            disabled="@IsBusy" />
         </div>
     </div>
 
     <!-- Actions -->
     <div class="mt-3">
         <button class="btn btn-primary me-2"
-                @onclick="FetchDiff"
-                disabled="@DisableActions">
+        @onclick="FetchDiff"
+        disabled="@DisableActions">
             Fetch Diff
         </button>
         <button class="btn btn-secondary"
-                @onclick="CloneRepo"
-                disabled="@DisableActions">
+        @onclick="CloneRepo"
+        disabled="@DisableActions">
             Clone Repo
         </button>
     </div>
@@ -115,8 +115,8 @@
             var expanded = ExpandedFiles.Contains(file.FileName);
             <div class="card mb-3 shadow-sm">
                 <div class="card-header bg-light d-flex justify-content-between align-items-center"
-                     style="cursor:pointer"
-                     @onclick="() => ToggleFile(file.FileName)">
+                style="cursor:pointer"
+                @onclick="() => ToggleFile(file.FileName)">
                     <span>
                         <span class="fw-bold">@file.FileName</span>
                         <span class="badge bg-success ms-2">+@file.Added</span>
@@ -214,7 +214,9 @@
     {
         SetBusy(true);
         TokenOk = TokenFail = false;
-        TokenOk = await GitHub.ValidateTokenAsync(Token);
+        TokenOk = await GitHub.ValidateTokenAsync(new SourceControlConnectionString(){
+            Token = Token
+        });
         TokenFail = !TokenOk;
         SetBusy(false);
     }
@@ -225,20 +227,31 @@
         try
         {
             StartOp("Fetching diff…");
-            var raw = await GitHub.GetPullRequestDiffAsync(Token, Owner, Repo, PrNumber);
+            var raw = await GitHub.GetPullRequestDiffAsync(CreateConnectionString(),
+            PrNumber);
             ParseUnifiedDiff(raw);
             EndOp("Diff loaded.");
         }
         catch (Exception ex) { EndOp($"❌ {ex.Message}"); }
     }
 
+    private SourceControlConnectionString CreateConnectionString()
+    {
+        return new SourceControlConnectionString()
+            {
+                Token = Token,
+                Owner = Owner,
+                Repo = Repo
+            };
+    }
+    
     // Clone repo
     private async Task CloneRepo()
     {
         try
         {
             StartOp("Cloning repository…");
-            var path = await GitHub.CloneRepository(Token, Owner, Repo);
+            var path = await GitHub.CloneRepository(CreateConnectionString());
             EndOp($"Cloned to {path}");
         }
         catch (Exception ex) { EndOp($"❌ {ex.Message}"); }

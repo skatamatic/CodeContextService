@@ -14,16 +14,16 @@ public enum DefinitionAnalysisMode
 public class PRAnalyzerService
 {
     readonly DefinitionFinderServiceV2 referenceFinder;
-    readonly GitHubIntegrationService github;
+    readonly SourceControlIntegrationService sourceControlIntegrationService;
 
-    public PRAnalyzerService(GitHubIntegrationService github, DefinitionFinderServiceV2 definitionFinder)
+    public PRAnalyzerService(SourceControlIntegrationService sourceControlIntegrationService, DefinitionFinderServiceV2 definitionFinder)
     {
         this.referenceFinder = definitionFinder;
-        this.github = github;
+        this.sourceControlIntegrationService = sourceControlIntegrationService;
     }
 
     public async Task<AnalysisResult> RunAnalysis(
-        AdoConnectionString cs,
+        SourceControlConnectionString cs,
         int prNumber,
         int depth,
         DefinitionAnalysisMode mode,
@@ -38,7 +38,7 @@ public class PRAnalyzerService
         string? prBranchName;
         try
         {
-            prBranchName = await github.GetPullRequestHeadBranchAsync(cs, prNumber);
+            prBranchName = await sourceControlIntegrationService.GetPullRequestHeadBranchAsync(cs, prNumber);
             log($"Pull request #{prNumber} is from branch: '{prBranchName}'.");
         }
         catch (Exception ex)
@@ -49,11 +49,11 @@ public class PRAnalyzerService
         }
 
         log($"Cloning repository '{cs.Repo}' (branch: '{prBranchName ?? "default"}').");
-        var path = await github.CloneRepository(cs, prBranchName);
+        var path = await sourceControlIntegrationService.CloneRepository(cs, prBranchName);
         log($"Cloned to {path}");
 
         log($"Fetching PR diff for PR #{prNumber}");
-        var raw = await github.GetPullRequestDiffAsync(cs, prNumber);
+        var raw = await sourceControlIntegrationService.GetPullRequestDiffAsync(cs, prNumber);
         var diff = ParseUnifiedDiff(raw);
         log($"Fetched diff, files changed: {diff.Count()}");
 
