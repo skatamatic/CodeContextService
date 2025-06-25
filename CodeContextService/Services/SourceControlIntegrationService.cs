@@ -19,7 +19,6 @@ namespace CodeContextService.Services
                 return _gitHub;
             else
                 return _ado;
-
         }
 
         public Task<bool> ValidateTokenAsync(SourceControlConnectionInfo cs)
