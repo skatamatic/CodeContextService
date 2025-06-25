@@ -227,9 +227,9 @@
         try
         {
             StartOp("Fetching diff…");
-            var raw = await GitHub.GetPullRequestDiffAsync(CreateConnectionString(),
+            var unifiedDiff = await GitHub.GetUnifiedDiff(CreateConnectionString(),
             PrNumber);
-            ParseUnifiedDiff(raw);
+            ParseUnifiedDiff(unifiedDiff.Diff);
             EndOp("Diff loaded.");
         }
         catch (Exception ex) { EndOp($"❌ {ex.Message}"); }

@@ -1,4 +1,6 @@
-﻿using LibGit2Sharp;
+﻿using CodeContextService.Model;
+using LibGit2Sharp;
+using Microsoft.Build.Tasks;
 using Newtonsoft.Json.Linq;
 using System.Net.Http.Headers;
 using System.Text;
@@ -10,6 +12,7 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
 {
     private readonly IHttpClientFactory _factory;
     private readonly ILogger<AzureDevOpsIntegrationService> _log;
+    private Repository? _repo;
 
     public AzureDevOpsIntegrationService(IHttpClientFactory factory, ILogger<AzureDevOpsIntegrationService> log)
     {
@@ -34,99 +37,22 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
         return resp.IsSuccessStatusCode;
     }
 
-
-    public async Task<string> GetPullRequestDiffAsync(SourceControlConnectionString cs, int prId)
+    /// <summary>
+    /// Extracts the short name (last part) of a branch reference.
+    /// For example, "refs/heads/feature/xyz" becomes "xyz".
+    /// </summary>
+    private static string GetShortBranchName(string fullRef)
     {
-        try
-        {
-            var client = CreateClient(cs);
-
-            var iterationsUrl = $"{cs.Org}/{cs.Project}/_apis/git/repositories/{cs.Repo}/pullRequests/{prId}/iterations?api-version=7.0";
-            var iterationsResp = await client.GetAsync(iterationsUrl);
-            iterationsResp.EnsureSuccessStatusCode();
-
-            var json = JsonDocument.Parse(await iterationsResp.Content.ReadAsStringAsync());
-            var lastIterationId = json.RootElement.GetProperty("value").EnumerateArray().Last().GetProperty("id").GetInt32();
-
-            var changesUrl = $"{cs.Org}/{cs.Project}/_apis/git/repositories/{cs.Repo}/pullRequests/{prId}/iterations/{lastIterationId}/changes?api-version=7.0";
-            var diffResp = await client.GetAsync(changesUrl);
-            diffResp.EnsureSuccessStatusCode();
-
-            var diffJson = JsonDocument.Parse(await diffResp.Content.ReadAsStringAsync());
-            var sb = new StringBuilder();
-
-            foreach (var fileDiff in diffJson.RootElement.GetProperty("changeEntries").EnumerateArray())
-            {
-                sb.Append(ConvertAdoDiffToUnified(fileDiff));
-            }
-
-            return sb.ToString();
-        }
-        catch(Exception ex)
-        {
+        if (string.IsNullOrEmpty(fullRef))
             return string.Empty;
-        }
-    }
 
-    private string ConvertAdoDiffToUnified(JsonElement fileDiff)
-    {
-        var sb = new StringBuilder();
-        var path = fileDiff.GetProperty("item").GetProperty("path").GetString()!;
-        sb.AppendLine($"diff --git a/{path} b/{path}");
-        sb.AppendLine($"--- a/{path}");
-        sb.AppendLine($"+++ b/{path}");
-
-        if (!fileDiff.TryGetProperty("diff", out var diff))
-            return sb.ToString(); // No diff content, maybe a rename or binary change
-
-        foreach (var block in diff.GetProperty("lineDiffBlocks").EnumerateArray())
-        {
-            var oStart = block.GetProperty("originalStartLine").GetInt32();
-            var oCount = block.GetProperty("originalLineCount").GetInt32();
-            var mStart = block.GetProperty("modifiedStartLine").GetInt32();
-            var mCount = block.GetProperty("modifiedLineCount").GetInt32();
-
-            sb.AppendLine($"@@ -{oStart},{oCount} +{mStart},{mCount} @@");
-
-            foreach (var mLine in block.GetProperty("mLines").EnumerateArray())
-            {
-                var lineText = mLine.GetProperty("line").GetString();
-                var type = mLine.GetProperty("lineType").GetString();
-                string prefix = type switch
-                {
-                    "add" => "+",
-                    "delete" => "-",
-                    _ => " "
-                };
-                sb.AppendLine($"{prefix}{lineText}");
-            }
-        }
-
-        return sb.ToString();
-    }
-
-    public async Task<string> GetPullRequestHeadBranchAsync(SourceControlConnectionString cs, int prId)
-    {
-        var client = CreateClient(cs);
-        var url = $"{cs.Org}/{cs.Project}/_apis/git/repositories/{cs.Repo}/pullRequests/{prId}?api-version=7.0";
-        _log.LogInformation("Fetching PR head branch from {Url}", url);
-        var resp = await client.GetAsync(url);
-        resp.EnsureSuccessStatusCode();
-        var content = await resp.Content.ReadAsStringAsync();
-
-        using var doc = JsonDocument.Parse(content);
-        var refName = doc.RootElement.GetProperty("sourceRefName").GetString();
-        var branch = refName?.Replace("refs/heads/", "");
-
-        if (string.IsNullOrEmpty(branch))
-            throw new InvalidOperationException($"Could not determine source branch for PR {prId}");
-
-        return branch;
+        var parts = fullRef.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 ? parts[^1] : fullRef;
     }
 
     public async Task<string> CloneRepository(SourceControlConnectionString cs, string? branch = "master")
     {
-        var url = $"https://{cs.Org}@dev.azure.com/{cs.Org}/{cs.Project}/_git/{cs.Repo}";
+        var url = $"https://dev.azure.com/{cs.Org}/{cs.Project}/_git/{cs.Repo}";
         var destDir = Path.Combine(Path.GetTempPath(), $"{cs.Repo}-{Guid.NewGuid()}");
         var co = new CloneOptions(new FetchOptions()
         {
@@ -143,6 +69,39 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
 
         _log.LogInformation("Cloning {Url} to {Dir}", url, destDir);
         await Task.Run(() => Repository.Clone(url, destDir, co));
+        _repo = new Repository(destDir);
         return destDir;
+    }
+
+    public async Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionString cs, int prNumber)
+    {
+        var client = CreateClient(cs);
+        var url = $"{cs.Org}/{cs.Project}/_apis/git/repositories/{cs.Repo}/pullRequests/{prNumber}?api-version=7.0";
+        _log.LogInformation("Fetching PR head branch from {Url}", url);
+        var resp = await client.GetAsync(url);
+        resp.EnsureSuccessStatusCode();
+        var content = await resp.Content.ReadAsStringAsync();
+
+        using var doc = JsonDocument.Parse(content);
+        var sourceBranch = doc.RootElement.GetProperty("sourceRefName").GetString();
+        var targetBranch = doc.RootElement.GetProperty("targetRefName").GetString();
+
+        var path = await CloneRepository(cs, GetShortBranchName(targetBranch));
+
+        // Get the tips (latest commits) of the two branches
+        var branch1Commit = _repo.Branches.Where(s => GetShortBranchName(s.CanonicalName) == GetShortBranchName(sourceBranch)).First().Tip;
+        var branch2Commit = _repo.Branches.Where(s => GetShortBranchName(s.CanonicalName) == GetShortBranchName(targetBranch)).First().Tip;
+
+        // Get the trees for each commit
+        Tree branch1Tree = branch1Commit.Tree;
+        Tree branch2Tree = branch2Commit.Tree;
+
+        // Generate the diff between the trees
+        Patch patch = _repo.Diff.Compare<Patch>(branch1Tree, branch2Tree);
+
+        if (string.IsNullOrEmpty(sourceBranch))
+            throw new InvalidOperationException($"Could not determine source branch for PR {prNumber}");
+
+        return new UnifiedDiff(patch.Content, path);
     }
 }

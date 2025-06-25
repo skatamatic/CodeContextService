@@ -1,4 +1,6 @@
-﻿namespace CodeContextService.Services
+﻿using CodeContextService.Model;
+
+namespace CodeContextService.Services
 {
     public class SourceControlIntegrationService : ISourceControlIntegrationService
     {
@@ -23,13 +25,10 @@
         public Task<bool> ValidateTokenAsync(SourceControlConnectionString cs)
             => GetService(cs).ValidateTokenAsync(cs);
 
-        public Task<string> GetPullRequestDiffAsync(SourceControlConnectionString cs, int prNumber)
-            => GetService(cs).GetPullRequestDiffAsync(cs, prNumber);
-
-        public Task<string> GetPullRequestHeadBranchAsync(SourceControlConnectionString cs, int prNumber)
-            => GetService(cs).GetPullRequestHeadBranchAsync(cs, prNumber);
-
         public Task<string> CloneRepository(SourceControlConnectionString cs, string? branch = null)
             => GetService(cs).CloneRepository(cs, branch);
+
+        public Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionString cs, int prNumber)
+            => GetService(cs).GetUnifiedDiff(cs, prNumber);
     }
 }

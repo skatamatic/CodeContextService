@@ -1,4 +1,5 @@
-﻿using LibGit2Sharp;
+﻿using CodeContextService.Model;
+using LibGit2Sharp;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
@@ -35,10 +36,10 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         return resp.IsSuccessStatusCode;
     }
 
-    public async Task<string> GetPullRequestDiffAsync(SourceControlConnectionString cs, int prNumber)
+    private async Task<string> GetPullRequestDiffAsync(SourceControlConnectionString cs, int prNumber)
     {
         var client = CreateClient(cs.Token);
-        var req = new HttpRequestMessage(HttpMethod.Get, $"repos/{cs.Org}/{cs.Repo}/pulls/{prNumber}");
+        var req = new HttpRequestMessage(HttpMethod.Get, $"repos/{cs.Owner}/{cs.Repo}/pulls/{prNumber}");
         req.Headers.Accept.Clear();
         req.Headers.Accept.ParseAdd("application/vnd.github.v3.diff");
         var resp = await client.SendAsync(req);
@@ -46,10 +47,10 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         return await resp.Content.ReadAsStringAsync();
     }
 
-    public async Task<string> GetPullRequestHeadBranchAsync(SourceControlConnectionString cs, int prNumber)
+    private async Task<string> GetPullRequestHeadBranchAsync(SourceControlConnectionString cs, int prNumber)
     {
         var client = CreateClient(cs.Token);
-        var url = $"repos/{cs.Org}/{cs.Repo}/pulls/{prNumber}";
+        var url = $"repos/{cs.Owner}/{cs.Repo}/pulls/{prNumber}";
         _log.LogInformation("Fetching PR details from {Url}", url);
         var resp = await client.GetAsync(url);
         resp.EnsureSuccessStatusCode();
@@ -75,7 +76,7 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
 
     public async Task<string> CloneRepository(SourceControlConnectionString cs, string? branch = null)
     {
-        var url = $"https://github.com/{cs.Org}/{cs.Repo}.git";
+        var url = $"https://github.com/{cs.Owner}/{cs.Repo}.git";
         var destDir = Path.Combine(Path.GetTempPath(), $"{cs.Repo}-{Guid.NewGuid()}");
         var co = new CloneOptions();
 
@@ -91,5 +92,29 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         _log.LogInformation("Cloning {Url} to {Dir}", url, destDir);
         await Task.Run(() => Repository.Clone(url, destDir, co));
         return destDir;
+    }
+
+    public async Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionString cs, int prNumber)
+    {
+        string prBranchName = string.Empty;
+
+        try
+        {
+            prBranchName = await GetPullRequestHeadBranchAsync(cs, prNumber);
+            _log.LogInformation($"Pull request #{prNumber} is from branch: '{prBranchName}'.");
+        }
+        catch (Exception ex)
+        {
+            _log.LogError($"❌ Error fetching PR branch details: {ex.Message}. Cloning default branch instead.");
+            prBranchName = null;
+            _log.LogError($"Warning: Could not determine PR branch. Will attempt to clone default branch of '{cs.Repo}'.");
+        }
+
+        var path = await CloneRepository(cs, prBranchName);
+    
+        _log.LogInformation($"Fetching PR diff for PR #{prNumber}");
+        var rawDiff = await GetPullRequestDiffAsync(cs, prNumber);
+
+        return new UnifiedDiff(path, rawDiff);
     }
 }
