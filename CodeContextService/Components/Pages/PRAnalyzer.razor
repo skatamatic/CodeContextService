@@ -356,8 +356,7 @@
     IReadOnlyCollection<DefinitionResult>? RawMergedResults { get; set; } // Store raw for potential re-processing
     Dictionary<string, DefinitionDisplayModel[]> MergedDefinitionResults { get; } = new(); // For flattened view
 
-    bool DisableActions => IsBusy || CreateConnectionString() == null
-                            || PrNumber <= 0;
+    bool DisableActions => IsBusy || CreateConnectionInfo() == null || PrNumber <= 0;
 
     // View Mode
     private enum ResultView { FileByFile, Flattened }
@@ -479,12 +478,12 @@
             return;
         }
        
-        var connection = CreateConnectionString();
+        var connection = CreateConnectionInfo();
         if(connection != null)
         {
             IsBusy = true;
             StateHasChanged(); // Show spinner
-            TokenOk = await SourceControl.ValidateTokenAsync(CreateConnectionString());
+            TokenOk = await SourceControl.ValidateTokenAsync(CreateConnectionInfo());
             TokenFail = !TokenOk;
             IsBusy = false;
             StateHasChanged();
@@ -519,7 +518,7 @@
         };
 
         var result = await Analyzer.RunAnalysis(
-           CreateConnectionString(), PrNumber, Depth, SelectedMode, x => logCallback(x)
+           CreateConnectionInfo(), PrNumber, Depth, SelectedMode, x => logCallback(x)
         );
 
         FileDiffs.AddRange(result.FileDiffs ?? Enumerable.Empty<FileDiff>());
@@ -552,7 +551,7 @@
         StateHasChanged();
     }
 
-    SourceControlConnectionInfo CreateConnectionString()
+    SourceControlConnectionInfo CreateConnectionInfo()
     {
 
         if(UseGitHub)
