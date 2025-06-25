@@ -1,6 +1,6 @@
 ﻿namespace CodeContextService.Services;
 
-public class SourceControlConnectionString
+public class SourceControlConnectionInfo
 {
     public bool IsGitHub { get; init; }
     public string Token { get; init; }

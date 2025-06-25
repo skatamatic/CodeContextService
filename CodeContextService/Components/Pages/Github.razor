@@ -214,7 +214,7 @@
     {
         SetBusy(true);
         TokenOk = TokenFail = false;
-        TokenOk = await GitHub.ValidateTokenAsync(new SourceControlConnectionString(){
+        TokenOk = await GitHub.ValidateTokenAsync(new SourceControlConnectionInfo(){
             Token = Token
         });
         TokenFail = !TokenOk;
@@ -235,9 +235,9 @@
         catch (Exception ex) { EndOp($"❌ {ex.Message}"); }
     }
 
-    private SourceControlConnectionString CreateConnectionString()
+    private SourceControlConnectionInfo CreateConnectionString()
     {
-        return new SourceControlConnectionString()
+        return new SourceControlConnectionInfo()
             {
                 Token = Token,
                 Owner = Owner,

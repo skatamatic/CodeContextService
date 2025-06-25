@@ -20,7 +20,7 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
         _log = log;
     }
 
-    private HttpClient CreateClient(SourceControlConnectionString cs)
+    private HttpClient CreateClient(SourceControlConnectionInfo cs)
     {
         var client = _factory.CreateClient();
         client.BaseAddress = new Uri($"https://dev.azure.com/");
@@ -30,7 +30,7 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
         return client;
     }
 
-    public async Task<bool> ValidateTokenAsync(SourceControlConnectionString cs)
+    public async Task<bool> ValidateTokenAsync(SourceControlConnectionInfo cs)
     {
         var client = CreateClient(cs);
         var resp = await client.GetAsync($"{cs.Org}/_apis/projects?api-version=2.0");
@@ -50,7 +50,7 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
         return parts.Length > 0 ? parts[^1] : fullRef;
     }
 
-    public async Task<string> CloneRepository(SourceControlConnectionString cs, string? branch = "master")
+    public async Task<string> CloneRepository(SourceControlConnectionInfo cs, string? branch = "master")
     {
         var url = $"https://dev.azure.com/{cs.Org}/{cs.Project}/_git/{cs.Repo}";
         var destDir = Path.Combine(Path.GetTempPath(), $"{cs.Repo}-{Guid.NewGuid()}");
@@ -73,7 +73,7 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
         return destDir;
     }
 
-    public async Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionString cs, int prNumber)
+    public async Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionInfo cs, int prNumber)
     {
         var client = CreateClient(cs);
         var url = $"{cs.Org}/{cs.Project}/_apis/git/repositories/{cs.Repo}/pullRequests/{prNumber}?api-version=7.0";

@@ -3,7 +3,7 @@
 namespace CodeContextService.API;
 
 public record AnalysisRequest(
-    SourceControlConnectionString sourceControlConnectionString,
+    SourceControlConnectionInfo sourceControlConnectionString,
     int PrNumber,
     int Depth,
     string Mode

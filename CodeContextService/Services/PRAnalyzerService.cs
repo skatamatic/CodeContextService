@@ -23,7 +23,7 @@ public class PRAnalyzerService
     }
 
     public async Task<AnalysisResult> RunAnalysis(
-        SourceControlConnectionString cs,
+        SourceControlConnectionInfo cs,
         int prNumber,
         int depth,
         DefinitionAnalysisMode mode,

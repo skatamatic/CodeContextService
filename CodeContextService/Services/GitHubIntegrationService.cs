@@ -26,7 +26,7 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         return client;
     }
 
-    public Task<bool> ValidateTokenAsync(SourceControlConnectionString cs)
+    public Task<bool> ValidateTokenAsync(SourceControlConnectionInfo cs)
         => ValidateTokenAsync(cs.Token);
 
     private async Task<bool> ValidateTokenAsync(string token)
@@ -36,7 +36,7 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         return resp.IsSuccessStatusCode;
     }
 
-    private async Task<string> GetPullRequestDiffAsync(SourceControlConnectionString cs, int prNumber)
+    private async Task<string> GetPullRequestDiffAsync(SourceControlConnectionInfo cs, int prNumber)
     {
         var client = CreateClient(cs.Token);
         var req = new HttpRequestMessage(HttpMethod.Get, $"repos/{cs.Owner}/{cs.Repo}/pulls/{prNumber}");
@@ -47,7 +47,7 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         return await resp.Content.ReadAsStringAsync();
     }
 
-    private async Task<string> GetPullRequestHeadBranchAsync(SourceControlConnectionString cs, int prNumber)
+    private async Task<string> GetPullRequestHeadBranchAsync(SourceControlConnectionInfo cs, int prNumber)
     {
         var client = CreateClient(cs.Token);
         var url = $"repos/{cs.Owner}/{cs.Repo}/pulls/{prNumber}";
@@ -74,7 +74,7 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         throw new InvalidOperationException($"Could not determine head branch for PR {prNumber}");
     }
 
-    public async Task<string> CloneRepository(SourceControlConnectionString cs, string? branch = null)
+    public async Task<string> CloneRepository(SourceControlConnectionInfo cs, string? branch = null)
     {
         var url = $"https://github.com/{cs.Owner}/{cs.Repo}.git";
         var destDir = Path.Combine(Path.GetTempPath(), $"{cs.Repo}-{Guid.NewGuid()}");
@@ -94,7 +94,7 @@ public class GitHubIntegrationService : ISourceControlIntegrationService
         return destDir;
     }
 
-    public async Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionString cs, int prNumber)
+    public async Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionInfo cs, int prNumber)
     {
         string prBranchName = string.Empty;
 

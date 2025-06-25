@@ -552,7 +552,7 @@
         StateHasChanged();
     }
 
-    SourceControlConnectionString CreateConnectionString()
+    SourceControlConnectionInfo CreateConnectionString()
     {
 
         if(UseGitHub)
@@ -562,7 +562,7 @@
                 return null;
             }
 
-            return new SourceControlConnectionString()
+            return new SourceControlConnectionInfo()
                 {
                     IsGitHub = true,
                     Token = Token,
@@ -577,7 +577,7 @@
                 return null;
             }
 
-            return new SourceControlConnectionString()
+            return new SourceControlConnectionInfo()
                 {
                     IsGitHub = false,
                     Token = Token,

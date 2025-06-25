@@ -13,7 +13,7 @@ namespace CodeContextService.Services
             _ado = ado;
         }
 
-        private ISourceControlIntegrationService GetService(SourceControlConnectionString cs)
+        private ISourceControlIntegrationService GetService(SourceControlConnectionInfo cs)
         {
             if (cs.IsGitHub)
                 return _gitHub;
@@ -22,13 +22,13 @@ namespace CodeContextService.Services
 
         }
 
-        public Task<bool> ValidateTokenAsync(SourceControlConnectionString cs)
+        public Task<bool> ValidateTokenAsync(SourceControlConnectionInfo cs)
             => GetService(cs).ValidateTokenAsync(cs);
 
-        public Task<string> CloneRepository(SourceControlConnectionString cs, string? branch = null)
+        public Task<string> CloneRepository(SourceControlConnectionInfo cs, string? branch = null)
             => GetService(cs).CloneRepository(cs, branch);
 
-        public Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionString cs, int prNumber)
+        public Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionInfo cs, int prNumber)
             => GetService(cs).GetUnifiedDiff(cs, prNumber);
     }
 }
