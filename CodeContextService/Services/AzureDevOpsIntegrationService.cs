@@ -89,15 +89,15 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
         var path = await CloneRepository(cs, GetShortBranchName(targetBranch));
 
         // Get the tips (latest commits) of the two branches
-        var branch1Commit = _repo.Branches.Where(s => GetShortBranchName(s.CanonicalName) == GetShortBranchName(sourceBranch)).First().Tip;
-        var branch2Commit = _repo.Branches.Where(s => GetShortBranchName(s.CanonicalName) == GetShortBranchName(targetBranch)).First().Tip;
+        var sourceBranchCommit = _repo.Branches.Where(s => GetShortBranchName(s.CanonicalName) == GetShortBranchName(sourceBranch)).First().Tip;
+        var targetBranchCommit = _repo.Branches.Where(s => GetShortBranchName(s.CanonicalName) == GetShortBranchName(targetBranch)).First().Tip;
 
         // Get the trees for each commit
-        Tree branch1Tree = branch1Commit.Tree;
-        Tree branch2Tree = branch2Commit.Tree;
+        Tree sourceBranchTree = sourceBranchCommit.Tree;
+        Tree targetBranchTree = targetBranchCommit.Tree;
 
         // Generate the diff between the trees
-        Patch patch = _repo.Diff.Compare<Patch>(branch1Tree, branch2Tree);
+        Patch patch = _repo.Diff.Compare<Patch>(targetBranchTree, sourceBranchTree);
 
         if (string.IsNullOrEmpty(sourceBranch))
             throw new InvalidOperationException($"Could not determine source branch for PR {prNumber}");
