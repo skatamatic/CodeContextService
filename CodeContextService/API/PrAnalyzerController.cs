@@ -3,9 +3,7 @@
 namespace CodeContextService.API;
 
 public record AnalysisRequest(
-    string Token,
-    string Owner,
-    string Repo,
+    SourceControlConnectionInfo SourceControlConnectionInfo,
     int PrNumber,
     int Depth,
     string Mode
@@ -32,7 +30,7 @@ public static class PrAnalyzerEndpoints
             var mode = string.IsNullOrEmpty(req.Mode) ? DefinitionAnalysisMode.Full : Enum.Parse<DefinitionAnalysisMode>(req.Mode);
             int depth = Math.Clamp(req.Depth, 1, 10);
             var result = await analyzer.RunAnalysis(
-                req.Token, req.Owner, req.Repo, req.PrNumber, req.Depth, mode, msg => logs.Add(msg)
+                req.SourceControlConnectionInfo, req.PrNumber, req.Depth, mode, msg => logs.Add(msg)
             );
 
             return Results.Ok(new { Logs = logs, Result = result });

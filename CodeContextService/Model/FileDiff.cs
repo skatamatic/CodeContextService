@@ -1,5 +1,11 @@
 ﻿namespace CodeContextService.Model;
 
+public record UnifiedDiff
+(
+    string Diff,
+    string Path
+);
+
 public class FileDiff
 {
     public string FileName { get; set; } = "";

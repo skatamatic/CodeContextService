@@ -14,17 +14,16 @@ public enum DefinitionAnalysisMode
 public class PRAnalyzerService
 {
     readonly DefinitionFinderServiceV2 referenceFinder;
-    readonly GitHubIntegrationService github;
+    readonly SourceControlIntegrationService sourceControlIntegrationService;
 
-    public PRAnalyzerService(GitHubIntegrationService github, DefinitionFinderServiceV2 definitionFinder)
+    public PRAnalyzerService(SourceControlIntegrationService sourceControlIntegrationService, DefinitionFinderServiceV2 definitionFinder)
     {
         this.referenceFinder = definitionFinder;
-        this.github = github;
+        this.sourceControlIntegrationService = sourceControlIntegrationService;
     }
 
-    public async Task<AnalysisResult> RunAnalysis(string token,
-        string owner,
-        string repo,
+    public async Task<AnalysisResult> RunAnalysis(
+        SourceControlConnectionInfo cs,
         int prNumber,
         int depth,
         DefinitionAnalysisMode mode,
@@ -34,29 +33,10 @@ public class PRAnalyzerService
 
         var definitionMap = new Dictionary<string, IEnumerable<Definition>>();
 
-        log($"Fetching PR details for owner {owner}, repo {repo}, PR #{prNumber} to determine branch.");
-        string? prBranchName;
-        try
-        {
-            prBranchName = await github.GetPullRequestHeadBranchAsync(token, owner, repo, prNumber);
-            log($"Pull request #{prNumber} is from branch: '{prBranchName}'.");
-        }
-        catch (Exception ex)
-        {
-            log($"❌ Error fetching PR branch details: {ex.Message}. Cloning default branch instead.");
-            prBranchName = null;
-            log($"Warning: Could not determine PR branch. Will attempt to clone default branch of '{repo}'.");
-        }
+        log($"Fetching PR details for org {cs.Org}, repo {cs.Repo}, PR #{prNumber} to determine branch.");
 
-        log($"Cloning repository '{repo}' (branch: '{prBranchName ?? "default"}').");
-        // Pass the prBranchName to CloneRepository.
-        // The CloneRepository method in GitHubIntegrationService is already designed to use the 'branch' parameter.
-        var path = await github.CloneRepository(token, owner, repo, prBranchName);
-        log($"Cloned to {path}");
-
-        log($"Fetching PR diff for PR #{prNumber}");
-        var raw = await github.GetPullRequestDiffAsync(token, owner, repo, prNumber);
-        var diff = ParseUnifiedDiff(raw);
+        var unifiedDiff = await sourceControlIntegrationService.GetUnifiedDiff(cs, prNumber);
+        var diff = ParseUnifiedDiff(unifiedDiff.Diff);
         log($"Fetched diff, files changed: {diff.Count()}");
 
         bool omitSourceFile = true;
@@ -64,13 +44,13 @@ public class PRAnalyzerService
         var aggregateResults = mode switch
         {
             DefinitionAnalysisMode.Minified => await referenceFinder.FindAggregatedMinimalDefinitionsAsync(
-                diff.Select(f => Path.Combine(path, f.FileName)),
+                diff.Select(f => Path.Combine(unifiedDiff.Path, f.FileName)),
                 depth,
                 ExplainMode.None,
                 excludeTargetSourceFileDefinitionsPerFile: omitSourceFile
             ),
             DefinitionAnalysisMode.MinifiedExplain => await referenceFinder.FindAggregatedMinimalDefinitionsAsync(
-                diff.Select(f => Path.Combine(path, f.FileName)),
+                diff.Select(f => Path.Combine(unifiedDiff.Path, f.FileName)),
                 depth,
                 ExplainMode.ReasonForInclusion,
                 excludeTargetSourceFileDefinitionsPerFile: omitSourceFile
@@ -85,7 +65,7 @@ public class PRAnalyzerService
         }
 
         var json = JsonConvert.SerializeObject(flatAggregate, Formatting.Indented);
-        log($"Flat analysis complete complete:\n{json}");
+        log($"Flat analysis complete:\n{json}");
 
         foreach (var file in diff.Where(f => f.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
         {
@@ -95,17 +75,18 @@ public class PRAnalyzerService
                 IEnumerable<DefinitionResult> results = mode switch
                 {
                     DefinitionAnalysisMode.Full => await referenceFinder.FindAllDefinitionsAsync(
-                        Path.Combine(path, file.FileName),
+                        Path.Combine(unifiedDiff.Path, file.FileName),
                         depth
                     ),
                     DefinitionAnalysisMode.Minified => await referenceFinder.FindMinimalDefinitionsAsync(
-                        Path.Combine(path, file.FileName),
+                        Path.Combine(unifiedDiff.Path, file.FileName),
                         depth,
                         excludeTargetSourceFileDefinitions: omitSourceFile
                     ),
                     DefinitionAnalysisMode.MinifiedExplain => await referenceFinder.FindMinimalDefinitionsAsync(
-                        Path.Combine(path, file.FileName),
-                        depth, ExplainMode.ReasonForInclusion,
+                        Path.Combine(unifiedDiff.Path, file.FileName),
+                        depth,
+                        ExplainMode.ReasonForInclusion,
                         excludeTargetSourceFileDefinitions: omitSourceFile
                     ),
                     _ => throw new NotImplementedException(),
@@ -129,10 +110,9 @@ public class PRAnalyzerService
             MergedResults = aggregateResults
         };
 
-        // Cleanup
         try
         {
-            Directory.Delete(path, true);
+            Directory.Delete(unifiedDiff.Path, true);
         }
         catch (Exception ex)
         {

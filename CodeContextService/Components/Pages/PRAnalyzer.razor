@@ -7,7 +7,7 @@
 @using CodeContextService.Components.ViewModels
 @inject IJSRuntime JS
 @inject PRAnalyzerService Analyzer
-@inject GitHubIntegrationService GitHub
+@inject SourceControlIntegrationService SourceControl
 @rendermode InteractiveServer
 
 <HeadContent>
@@ -18,34 +18,34 @@
     <script>
         window.highlight = () => Prism.highlightAll();
         window.scrollToBottom = id => {
-            const el = document.getElementById(id);
-            if (el) el.scrollTop = el.scrollHeight;
+        const el = document.getElementById(id);
+        if (el) el.scrollTop = el.scrollHeight;
         };
         window.getCookieByName = name => {
-            const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-            return match ? decodeURIComponent(match[2]) : null;
+        const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+        return match ? decodeURIComponent(match[2]) : null;
         };
         window.setCookie = (name, value) => {
-            document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}`;
+        document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}`;
         };
     </script>
 
     <script>
         window.updateStickyOffset = () => {
-            const searchEl = document.querySelector('.filter-container');
-            const searchH = searchEl ? searchEl.getBoundingClientRect().height : 0;
-            document.documentElement.style.setProperty('--search-bar-height', `${searchH}px`);
+        const searchEl = document.querySelector('.filter-container');
+        const searchH = searchEl ? searchEl.getBoundingClientRect().height : 0;
+        document.documentElement.style.setProperty('--search-bar-height', `${searchH}px`);
 
-            const fileHdrQuery = CurrentActiveView === ResultView.FileByFile
-                ? '.card.expanded > .card-header'
-                : '.card.expanded-flat > .card-header'; // Use a different class for flat view if needed or adjust selector
-            const fileHdr = document.querySelector(fileHdrQuery);
-            if (fileHdr) {
-                const fileH = fileHdr.getBoundingClientRect().height;
-                document.documentElement.style.setProperty('--file-header-height', `${fileH}px`);
-            } else {
-                document.documentElement.style.setProperty('--file-header-height', `0px`);
-            }
+        const fileHdrQuery = CurrentActiveView === ResultView.FileByFile
+        ? '.card.expanded > .card-header'
+        : '.card.expanded-flat > .card-header'; // Use a different class for flat view if needed or adjust selector
+        const fileHdr = document.querySelector(fileHdrQuery);
+        if (fileHdr) {
+        const fileH = fileHdr.getBoundingClientRect().height;
+        document.documentElement.style.setProperty('--file-header-height', `${fileH}px`);
+        } else {
+        document.documentElement.style.setProperty('--file-header-height', `0px`);
+        }
         };
         window.addEventListener('load', updateStickyOffset);
         window.addEventListener('resize', updateStickyOffset);
@@ -53,17 +53,17 @@
 
     <script>
         window.scrollIfStuck = (id, wasExpandedBefore) => {
-            const el = document.getElementById(id);
-            if (!el || !wasExpandedBefore) return;
-            const rootStyles = getComputedStyle(document.documentElement);
-            const searchH = parseFloat(rootStyles.getPropertyValue('--search-bar-height')) || 0;
-            const fileH = parseFloat(rootStyles.getPropertyValue('--file-header-height')) || 0;
-            const totalOffset = searchH + fileH;
-            const rect = el.getBoundingClientRect();
-            if (rect.top <= totalOffset + 1) {
-                const targetY = window.pageYOffset + rect.top - totalOffset - 1; // Adjust by 1px to ensure it's above the sticky
-                window.scrollTo({ top: targetY, left: 0, behavior: 'auto' });
-            }
+        const el = document.getElementById(id);
+        if (!el || !wasExpandedBefore) return;
+        const rootStyles = getComputedStyle(document.documentElement);
+        const searchH = parseFloat(rootStyles.getPropertyValue('--search-bar-height')) || 0;
+        const fileH = parseFloat(rootStyles.getPropertyValue('--file-header-height')) || 0;
+        const totalOffset = searchH + fileH;
+        const rect = el.getBoundingClientRect();
+        if (rect.top <= totalOffset + 1) {
+        const targetY = window.pageYOffset + rect.top - totalOffset - 1; // Adjust by 1px to ensure it's above the sticky
+        window.scrollTo({ top: targetY, left: 0, behavior: 'auto' });
+        }
         };
     </script>
 </HeadContent>
@@ -71,34 +71,49 @@
 <PageTitle>PR Code Analyzer</PageTitle>
 
 <div class="container py-4">
-    <h3>Analyze GitHub PR</h3>
-
-    <div class="row g-3 mb-3">
-        <div class="col-md-3">
-            <input class="form-control" placeholder="Owner"
-                   value="@Owner"
-                   @oninput="@(e => OnFieldChanged("Owner", e.Value?.ToString()))"
-                   disabled="@IsBusy" />
-        </div>
-        <div class="col-md-3">
-            <input class="form-control" placeholder="Repository"
-                   value="@Repo"
-                   @oninput="@(e => OnFieldChanged("Repo", e.Value?.ToString()))"
-                   disabled="@IsBusy" />
-        </div>
-        <div class="col-md-2">
-            <input type="number" class="form-control" placeholder="PR #"
-                   value="@PrNumber"
-                   @oninput="OnPrNumberChanged"
-                   min="1" disabled="@IsBusy" />
-        </div>
-        <div class="col-md-4">
-            <input type="password" class="form-control" placeholder="PAT Token"
-                   value="@Token"
-                   @oninput="@(e => OnFieldChanged("Token", e.Value?.ToString()))"
-                   disabled="@IsBusy" />
-        </div>
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" id="toggleSource" @bind="UseGitHub" />
+        <label class="form-check-label" for="toggleSource">Use GitHub (uncheck for ADO)</label>
     </div>
+
+    @if (UseGitHub)
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-md-3">
+                <input class="form-control" placeholder="Owner" value="@Owner" @oninput="@(e => OnFieldChanged("Owner", e.Value?.ToString()))" disabled="@IsBusy" />
+            </div>
+            <div class="col-md-3">
+                <input class="form-control" placeholder="Repository" value="@Repo" @oninput="@(e => OnFieldChanged("Repo", e.Value?.ToString()))" disabled="@IsBusy" />
+            </div>
+            <div class="col-md-2">
+                <input type="number" class="form-control" placeholder="PR #" value="@PrNumber" @oninput="OnPrNumberChanged" min="1" disabled="@IsBusy" />
+            </div>
+            <div class="col-md-4">
+                <input type="password" class="form-control" placeholder="PAT Token" value="@Token" @oninput="@(e => OnFieldChanged("Token", e.Value?.ToString()))" disabled="@IsBusy" />
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-md-3">
+                <input class="form-control" placeholder="Org" value="@Org" @oninput="@(e => OnFieldChanged("Org", e.Value?.ToString()))" disabled="@IsBusy" />
+            </div>
+            <div class="col-md-3">
+                <input class="form-control" placeholder="Project" value="@Project" @oninput="@(e => OnFieldChanged("Project", e.Value?.ToString()))" disabled="@IsBusy" />
+            </div>
+                 <div class="col-md-3">
+                    <input class="form-control" placeholder="Repository" value="@Repo" @oninput="@(e => OnFieldChanged("Repo", e.Value?.ToString()))" disabled="@IsBusy" />
+                </div>
+            <div class="col-md-2">
+                <input type="number" class="form-control" placeholder="PR #" value="@PrNumber" @oninput="OnPrNumberChanged" min="1" disabled="@IsBusy" />
+            </div>
+            <div class="col-md-4">
+                <input type="password" class="form-control" placeholder="PAT Token" value="@Token" @oninput="@(e => OnFieldChanged("Token", e.Value?.ToString()))" disabled="@IsBusy" />
+            </div>
+        </div>
+    }
+
 
     <div class="row mb-3">
         <div class="col-auto">
@@ -110,11 +125,11 @@
         </div>
         <div class="col-auto">
             <input type="number" class="form-control"
-                   value="@Depth"
-                   @oninput="OnDepthChanged"
-                   disabled="@IsBusy"
-                   placeholder="Depth"
-                   min="0" />
+            value="@Depth"
+            @oninput="OnDepthChanged"
+            disabled="@IsBusy"
+            placeholder="Depth"
+            min="0" />
         </div>
     </div>
 
@@ -132,8 +147,8 @@
         {
             <h5>Logs</h5>
             <div id="logsContainer"
-                 class="border rounded p-2 bg-light"
-                 style="max-height:@(LogsExpanded ? "300px" : "auto");overflow-y:@(LogsExpanded ? "auto" : "visible");transition:max-height 0.3s; font-family: monospace; font-size: 0.85em;">
+            class="border rounded p-2 bg-light"
+            style="max-height:@(LogsExpanded ? "300px" : "auto");overflow-y:@(LogsExpanded ? "auto" : "visible");transition:max-height 0.3s; font-family: monospace; font-size: 0.85em;">
                 <ul class="list-unstyled mb-0">
                     @foreach (var line in Log)
                     {
@@ -172,27 +187,27 @@
 
         <div class="mb-4 filter-container" style="position: sticky; top: 0; background-color: white; z-index: 100; padding-top: 10px; padding-bottom:10px;">
             <input class="form-control"
-                   placeholder="Filter definitions by name"
-                   @bind="DefFilter"
-                   @bind:event="oninput" />
+            placeholder="Filter definitions by name"
+            @bind="DefFilter"
+            @bind:event="oninput" />
         </div>
 
         @if (CurrentActiveView == ResultView.FileByFile)
         {
             @foreach (var file in FileDiffs
-           .Where(f => f.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-           .Where(f => string.IsNullOrWhiteSpace(DefFilter)
-           || (AnalysisResults.ContainsKey(f.FileName)
-           && AnalysisResults[f.FileName]
-           .Any(d => d.FullName.Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))))
+    .Where(f => f.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+    .Where(f => string.IsNullOrWhiteSpace(DefFilter)
+    || (AnalysisResults.ContainsKey(f.FileName)
+    && AnalysisResults[f.FileName]
+    .Any(d => d.FullName.Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))))
             {
                 var fileKey = file.FileName!;
                 var isFileExpanded = ExpandedFiles.Contains(fileKey);
                 <div class="card mb-3 shadow-sm @(isFileExpanded ? "expanded" : "")">
                     <div id="fileHeader-@fileKey.Replace("\\", "-").Replace("/", "-")"
-                         class="card-header d-flex justify-content-between align-items-center"
-                         style="cursor:pointer; position: sticky; top: var(--search-bar-height, 50px); background-color: white; z-index: 90;"
-                         @onclick="async () => { await ToggleFile(fileKey); }">
+                    class="card-header d-flex justify-content-between align-items-center"
+                    style="cursor:pointer; position: sticky; top: var(--search-bar-height, 50px); background-color: white; z-index: 90;"
+                    @onclick="async () => { await ToggleFile(fileKey); }">
                         <strong>@file.FileName</strong>
                         <span>
                             <span class="badge bg-success me-1">+@file.Added</span>
@@ -210,16 +225,16 @@
                             @if (AnalysisResults.TryGetValue(file.FileName!, out var defsForFile) && defsForFile.Any())
                             {
                                 @foreach (var def in defsForFile
-                               .Where(d => string.IsNullOrWhiteSpace(DefFilter)
-                               || d.FullName.Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))
+                       .Where(d => string.IsNullOrWhiteSpace(DefFilter)
+                       || d.FullName.Contains(DefFilter, StringComparison.OrdinalIgnoreCase)))
                                 {
                                     var defKey = $"{file.FileName}|{def.FullName}";
                                     var isDefExpanded = ExpandedDefs.Contains(defKey);
                                     <div class="card mb-2 @(isDefExpanded ? "expanded" : "")">
                                         <div class="card-header"
-                                             id="defHeader-@Uri.EscapeDataString(defKey)"
-                                             style="cursor:pointer; position: sticky; top: calc(var(--search-bar-height, 50px) + var(--file-header-height, 50px)); background-color: #f8f9fa; z-index: 80;"
-                                             @onclick="async () => { await ToggleDef(defKey); }">
+                                        id="defHeader-@Uri.EscapeDataString(defKey)"
+                                        style="cursor:pointer; position: sticky; top: calc(var(--search-bar-height, 50px) + var(--file-header-height, 50px)); background-color: #f8f9fa; z-index: 80;"
+                                        @onclick="async () => { await ToggleDef(defKey); }">
                                             <b>Definition:</b> @def.FullName
                                             <span class="ms-2">@((isDefExpanded) ? "▲" : "▼")</span>
                                         </div>
@@ -267,9 +282,9 @@
 
                 <div class="card mb-3 shadow-sm @(isFileExpanded ? "expanded-flat" : "")">
                     <div id="flatFileHeader-@flatFileCardKey.Replace("\\", "-").Replace("/", "-").Replace(":", "-")"
-                         class="card-header d-flex justify-content-between align-items-center"
-                         style="cursor:pointer; position: sticky; top: var(--search-bar-height, 50px); background-color: white; z-index: 90;"
-                         @onclick="async () => { await ToggleFlatFile(flatFileCardKey); }">
+                    class="card-header d-flex justify-content-between align-items-center"
+                    style="cursor:pointer; position: sticky; top: var(--search-bar-height, 50px); background-color: white; z-index: 90;"
+                    @onclick="async () => { await ToggleFlatFile(flatFileCardKey); }">
                         <span>
                             <strong>@displayFileName</strong>
                             <small class="text-muted ms-2">(@filePathKey)</small>
@@ -288,9 +303,9 @@
                                 var isDefExpanded = ExpandedFlatDefs.Contains(flatDefKey);
                                 <div class="card mb-2 @(isDefExpanded ? "expanded" : "")">
                                     <div class="card-header"
-                                         id="flatDefHeader-@Uri.EscapeDataString(flatDefKey)"
-                                         style="cursor:pointer; position: sticky; top: calc(var(--search-bar-height, 50px) + var(--file-header-height, 50px)); background-color: #f8f9fa; z-index: 80;"
-                                         @onclick="async () => { await ToggleFlatDef(flatDefKey); }">
+                                    id="flatDefHeader-@Uri.EscapeDataString(flatDefKey)"
+                                    style="cursor:pointer; position: sticky; top: calc(var(--search-bar-height, 50px) + var(--file-header-height, 50px)); background-color: #f8f9fa; z-index: 80;"
+                                    @onclick="async () => { await ToggleFlatDef(flatDefKey); }">
                                         <b>Definition:</b> @def.FullName
                                         <span class="ms-2">@((isDefExpanded) ? "▲" : "▼")</span>
                                     </div>
@@ -311,12 +326,21 @@
 </div>
 
 @code {
+
+
+
     // Persisted inputs
     string? Owner;
     string? Repo;
     int PrNumber;
     int Depth = 1; // Default depth to 1, can be overridden by cookie
     string? Token;
+
+    string? Project;
+
+    string? Org;
+
+    bool UseGitHub;
     DefinitionAnalysisMode SelectedMode { get; set; } = DefinitionAnalysisMode.Minified;
 
     // UI state
@@ -332,10 +356,7 @@
     IReadOnlyCollection<DefinitionResult>? RawMergedResults { get; set; } // Store raw for potential re-processing
     Dictionary<string, DefinitionDisplayModel[]> MergedDefinitionResults { get; } = new(); // For flattened view
 
-    bool DisableActions => IsBusy || !TokenOk
-                            || string.IsNullOrWhiteSpace(Owner)
-                            || string.IsNullOrWhiteSpace(Repo)
-                            || PrNumber <= 0;
+    bool DisableActions => IsBusy || CreateConnectionInfo() == null || PrNumber <= 0;
 
     // View Mode
     private enum ResultView { FileByFile, Flattened }
@@ -425,9 +446,14 @@
                 TokenOk = false; // Invalidate token status on change until re-tested
                 TokenFail = false;
                 break;
+            case "Project": Project = val; break;
+            case "Org": Org = val; break;
         }
         await JS.InvokeVoidAsync("setCookie", field, val);
+
     }
+
+
 
     private async Task OnPrNumberChanged(ChangeEventArgs e)
     {
@@ -451,12 +477,18 @@
             StateHasChanged();
             return;
         }
-        IsBusy = true;
-        StateHasChanged(); // Show spinner
-        TokenOk = await GitHub.ValidateTokenAsync(Token);
-        TokenFail = !TokenOk;
-        IsBusy = false;
-        StateHasChanged();
+       
+        var connection = CreateConnectionInfo();
+        if(connection != null)
+        {
+            IsBusy = true;
+            StateHasChanged(); // Show spinner
+            TokenOk = await SourceControl.ValidateTokenAsync(CreateConnectionInfo());
+            TokenFail = !TokenOk;
+            IsBusy = false;
+            StateHasChanged();
+        }
+       
     }
 
     private async Task RunAnalysis()
@@ -486,7 +518,7 @@
         };
 
         var result = await Analyzer.RunAnalysis(
-            Token!, Owner!, Repo!, PrNumber, Depth, SelectedMode, x => logCallback(x)
+           CreateConnectionInfo(), PrNumber, Depth, SelectedMode, x => logCallback(x)
         );
 
         FileDiffs.AddRange(result.FileDiffs ?? Enumerable.Empty<FileDiff>());
@@ -517,6 +549,43 @@
         DefFilter = string.Empty; // Reset filter
         IsBusy = false;
         StateHasChanged();
+    }
+
+    SourceControlConnectionInfo CreateConnectionInfo()
+    {
+
+        if(UseGitHub)
+        {
+            if(Token == null || Repo == null || Owner == null)
+            {
+                return null;
+            }
+
+            return new SourceControlConnectionInfo()
+                {
+                    IsGitHub = true,
+                    Token = Token,
+                    Repo = Repo,
+                    Owner = Owner
+                };
+        }
+        else
+        {
+            if (Token == null || Org == null || Project == null || Repo == null)
+            {
+                return null;
+            }
+
+            return new SourceControlConnectionInfo()
+                {
+                    IsGitHub = false,
+                    Token = Token,
+                    Org = Org,
+                    Repo = Repo,
+                    Project = Project
+                };
+        }
+        
     }
 
     void ToggleLogs()

@@ -14,6 +14,10 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Configuration
+    .AddJsonFile("appsettings.Local.json", optional: true) // <- added
+    .AddEnvironmentVariables();
+
 // 1) Bind your JWT settings and in-memory users from configuration
 var jwtSettings = builder.Configuration
     .GetSection("JwtSettings")
@@ -70,12 +74,24 @@ builder.Services
     .AddInteractiveServerComponents();
 
 builder.Services.AddHttpClient();
+builder.Services.AddScoped<AzureDevOpsIntegrationService>();
+builder.Services.AddScoped<SourceControlIntegrationService>();
 builder.Services.AddScoped<GitHubIntegrationService>();
 builder.Services.AddScoped<PRAnalyzerService>();
 builder.Services.AddScoped(sp =>
     new DefinitionFinderServiceV2(msg => Console.WriteLine($"[RF] {msg}"))
 );
-MSBuildLocator.RegisterDefaults();
+
+var msbuildPath = builder.Configuration["LocalSettings:MSBuildPath"];
+if (!string.IsNullOrWhiteSpace(msbuildPath))
+{
+    MSBuildLocator.RegisterMSBuildPath(msbuildPath);
+}
+else
+{
+    MSBuildLocator.RegisterDefaults();
+}
+
 
 // 5) Swagger for testing
 builder.Services.AddEndpointsApiExplorer();
