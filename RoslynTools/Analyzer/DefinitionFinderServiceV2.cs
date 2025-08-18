@@ -24,9 +24,23 @@ public sealed class DefinitionFinderServiceV2 : FinderServiceBase, IDefinitionFi
     public async Task<IReadOnlyCollection<DefinitionResult>> FindAllDefinitionsAsync(string file, int depth)
     {
         if (depth < 0) throw new ArgumentOutOfRangeException(nameof(depth), "Depth cannot be negative.");
-        var solution = await GetSolutionAsync(file);
-        var doc = LocateDocument(solution, file)
-                                 ?? throw new FileNotFoundException("The specified root file was not found in the solution.", file);
+        Solution? solution;
+        try
+        {
+            solution = await GetSolutionAsync(file);
+        }
+        catch (Exception ex)
+        {
+            _log($"FindAllDefinitionsAsync: Could not obtain solution for '{file}'. Skipping. {ex.Message}");
+            return Array.Empty<DefinitionResult>();
+        }
+
+        var doc = LocateDocument(solution, file);
+        if (doc is null)
+        {
+            _log($"FindAllDefinitionsAsync: Root file '{file}' not found in solution. Skipping.");
+            return Array.Empty<DefinitionResult>();
+        }
 
         var acc = new Dictionary<string, DefinitionResult>();
         await WalkFullAsync(solution, doc, depth, acc);
@@ -36,12 +50,22 @@ public sealed class DefinitionFinderServiceV2 : FinderServiceBase, IDefinitionFi
     /// <inheritdoc/>
     public async Task<DefinitionResult?> FindSingleClassDefinitionAsync(string anyFile, string className)
     {
-        var solution = await GetSolutionAsync(anyFile);
+        Solution? solution;
+        try
+        {
+            solution = await GetSolutionAsync(anyFile);
+        }
+        catch (Exception ex)
+        {
+            _log($"FindSingleClassDefinitionAsync: Could not obtain solution context using '{anyFile}'. Skipping. {ex.Message}");
+            return null;
+        }
+
         var sym = await LocateClassSymbolAsync(solution, className);
         if (sym is null) return null;
 
         var loc = sym.Locations.FirstOrDefault(l => l.IsInSource);
-        if (loc == null || loc.SourceTree == null) return null; // No source location
+        if (loc == null || loc.SourceTree == null) return null;
 
         var node = (await loc.SourceTree.GetRootAsync()).FindNode(loc.SourceSpan);
         return new DefinitionResult
@@ -56,15 +80,29 @@ public sealed class DefinitionFinderServiceV2 : FinderServiceBase, IDefinitionFi
         string file,
         int depth,
         ExplainMode explain = ExplainMode.None,
-        bool excludeTargetSourceFileDefinitions = false) // New parameter
+        bool excludeTargetSourceFileDefinitions = false)
     {
         if (depth < 0) throw new ArgumentOutOfRangeException(nameof(depth), "Depth cannot be negative.");
 
-        var solution = await GetSolutionAsync(file);
-        var rootDoc = LocateDocument(solution, file)
-                                ?? throw new FileNotFoundException("The specified root file was not found in the solution.", file);
+        Solution? solution;
+        try
+        {
+            solution = await GetSolutionAsync(file);
+        }
+        catch (Exception ex)
+        {
+            _log($"FindMinimalDefinitionsAsync: Could not obtain solution for '{file}'. Skipping. {ex.Message}");
+            return Array.Empty<DefinitionResult>();
+        }
 
-        var (keepMap, rootTypes) = await CrawlSymbolsAsync(solution, rootDoc, depth, excludeTargetSourceFileDefinitions); // Pass new parameter
+        var rootDoc = LocateDocument(solution, file);
+        if (rootDoc is null)
+        {
+            _log($"FindMinimalDefinitionsAsync: Root file '{file}' not found in solution. Skipping.");
+            return Array.Empty<DefinitionResult>();
+        }
+
+        var (keepMap, rootTypes) = await CrawlSymbolsAsync(solution, rootDoc, depth, excludeTargetSourceFileDefinitions);
         return await EmitMinimalDefinitionsAsync(solution, keepMap, rootTypes, explain);
     }
 
@@ -94,21 +132,25 @@ public sealed class DefinitionFinderServiceV2 : FinderServiceBase, IDefinitionFi
             return Array.Empty<DefinitionResult>();
         }
 
-        // It's crucial that all sourceFiles can be found within the same Roslyn Solution.
-        // GetSolutionAsync is part of FinderServiceBase. Its implementation details matter here.
-        // Assuming GetSolutionAsync(firstFile) can provide a solution context for all files,
-        // or that LocateDocument can work across projects if they are part of the loaded solution.
-        // A more robust approach might involve creating an AdhocWorkspace and adding all sourceFiles to it explicitly.
         var firstFile = sourceFiles.First();
         _log($"Attempting to load solution context using starting file: {firstFile}");
-        var solution = await GetSolutionAsync(firstFile);
-        if (solution == null)
+
+        Solution? solution;
+        try
         {
-            _log($"Error: Could not load solution from file {firstFile}. Cannot perform aggregation.");
-            // Consider throwing an exception or returning an error indicator.
+            solution = await GetSolutionAsync(firstFile);
+        }
+        catch (Exception ex)
+        {
+            _log($"Error: Could not load solution using '{firstFile}'. Skipping aggregation. {ex.Message}");
             return Array.Empty<DefinitionResult>();
         }
 
+        if (solution == null)
+        {
+            _log($"Error: GetSolutionAsync returned null for '{firstFile}'. Skipping aggregation.");
+            return Array.Empty<DefinitionResult>();
+        }
 
         var aggregatedKeepData = new Dictionary<INamedTypeSymbol, Dictionary<string, MemberInfo>>(SymbolEqualityComparer.Default);
         var aggregatedRootTypes = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);

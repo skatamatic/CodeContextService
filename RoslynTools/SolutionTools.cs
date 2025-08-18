@@ -72,16 +72,47 @@ public class BaseSolutionTools : ISolutionTools
 
     public string FindSolutionFile(string sourceFile)
     {
-        var directory = Path.GetDirectoryName(sourceFile);
+        if (string.IsNullOrWhiteSpace(sourceFile))
+            return null;
+
+        string startPath;
+        try
+        {
+            startPath = Path.GetFullPath(sourceFile);
+        }
+        catch
+        {
+            return null;
+        }
+
+        string directory;
+
+        // If the input is an existing directory, start there.
+        // Otherwise, start from the input's parent directory (even if the input file/dir doesn't exist).
+        if (Directory.Exists(startPath))
+        {
+            directory = startPath;
+        }
+        else
+        {
+            directory = Path.GetDirectoryName(startPath);
+            if (string.IsNullOrEmpty(directory))
+                return null;
+        }
+
         while (!string.IsNullOrEmpty(directory))
         {
-            var solutionFile = Directory.GetFiles(directory, "*.sln", SearchOption.TopDirectoryOnly);
-            if (solutionFile.Length > 0)
+            if (Directory.Exists(directory))
             {
-                return solutionFile[0];
+                var solutionFiles = Directory.GetFiles(directory, "*.sln", SearchOption.TopDirectoryOnly);
+                if (solutionFiles.Length > 0)
+                    return solutionFiles[0];
             }
-            directory = Directory.GetParent(directory)?.FullName;
+
+            var parent = Directory.GetParent(directory);
+            directory = parent?.FullName;
         }
+
         return null;
     }
 
