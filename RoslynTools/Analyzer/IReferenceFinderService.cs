@@ -8,4 +8,10 @@ public interface IDefinitionFinderService : IDisposable
 
     /// <summary>Finds the definition of <paramref name="className"/> or <see langword="null"/> if it cannot be located.</summary>
     Task<DefinitionResult?> FindSingleClassDefinitionAsync(string anySourceFileOfSolution, string className);
+
+    Task<IReadOnlyCollection<DefinitionResult>> FindAggregatedMinimalDefinitionsAsync(
+        IEnumerable<string> sourceFiles,
+        int depth,
+        ExplainMode explain = ExplainMode.None,
+        bool excludeTargetSourceFileDefinitionsPerFile = false);
 }

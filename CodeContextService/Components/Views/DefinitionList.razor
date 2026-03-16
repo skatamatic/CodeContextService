@@ -21,7 +21,7 @@ else
             var isExpanded = _expanded.Contains(key);
 
             var totalLines = def.Code?.Trim().Split('\n').Length ?? 0;
-            var needsOverlay = totalLines > 20;
+            var needsOverlay = totalLines > 10;
 
             <div class="card mb-3 shadow-sm">
                 <!-- Header -->

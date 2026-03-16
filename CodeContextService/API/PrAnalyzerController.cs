@@ -1,14 +1,13 @@
 using CodeContextService.Services;
 using Microsoft.AspNetCore.Http;
-using CodeContextService.Model;
 
 namespace CodeContextService.API;
 
 public record AnalysisRequest(
-    string Token,
-    string Owner,
-    string Repo,
-    int PrNumber
+    SourceControlConnectionInfo SourceControlConnectionInfo,
+    int PrNumber,
+    int Depth,
+    string Mode
 );
 
 public static class PrAnalyzerEndpoints
@@ -36,17 +35,19 @@ public static class PrAnalyzerEndpoints
         var logs = new List<string>();
         try
         {
+            var mode = string.IsNullOrEmpty(req.Mode) ? DefinitionAnalysisMode.Full : Enum.Parse<DefinitionAnalysisMode>(req.Mode);
+            int depth = Math.Clamp(req.Depth, 1, 10);
             var result = await analyzer.RunAnalysis(
-                req.Token, req.Owner, req.Repo, req.PrNumber, msg => logs.Add(msg)
+                req.SourceControlConnectionInfo, req.PrNumber, req.Depth, mode, msg => logs.Add(msg)
             );
+
             return Results.Ok(new { Logs = logs, Result = result });
         }
         catch (InvalidOperationException ex)
         {
             return Results.BadRequest(new
             {
-                error = ex.Message,
-                hint = "If calling from Azure DevOps, this endpoint expects a GitHub PAT plus GitHub owner/repo inputs."
+                error = ex.Message
             });
         }
         catch (HttpRequestException ex)

@@ -20,6 +20,10 @@ var builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment())
     builder.Configuration.AddUserSecrets<Program>(optional: true);
 
+builder.Configuration
+    .AddJsonFile("appsettings.Local.json", optional: true) // <- added
+    .AddEnvironmentVariables();
+
 // 1) Bind JWT, users, and repo clone options from configuration (env vars override appsettings)
 var jwtSettings = builder.Configuration
     .GetSection("JwtSettings")
@@ -139,13 +143,25 @@ builder.Services.AddHttpClient("github-no-redirect")
         // We handle redirect responses explicitly in GitHubIntegrationService.
         AllowAutoRedirect = false
     });
+builder.Services.AddScoped<AzureDevOpsIntegrationService>();
+builder.Services.AddScoped<SourceControlIntegrationService>();
 builder.Services.AddScoped<GitHubIntegrationService>();
 builder.Services.AddScoped<PRAnalyzerService>();
 builder.Services.AddScoped<UploadAnalyzerService>();
 builder.Services.AddScoped(sp =>
-    new DefinitionFinderService(msg => Console.WriteLine($"[RF] {msg}"))
+    new DefinitionFinderServiceV2(msg => Console.WriteLine($"[RF] {msg}"))
 );
-MSBuildLocator.RegisterDefaults();
+
+var msbuildPath = builder.Configuration["LocalSettings:MSBuildPath"];
+if (!string.IsNullOrWhiteSpace(msbuildPath))
+{
+    MSBuildLocator.RegisterMSBuildPath(msbuildPath);
+}
+else
+{
+    MSBuildLocator.RegisterDefaults();
+}
+
 
 // 5) Swagger for testing
 builder.Services.AddEndpointsApiExplorer();

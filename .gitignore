@@ -44,6 +44,7 @@ CodeCoverage/
 # MSBuild Binary and Structured Log
 *.binlog
 
+.vs/**
 # MSTest test Results
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
@@ -52,3 +53,6 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+/.vs/CodeContextService
+/.vs/ProjectEvaluation
+/CodeContextService/appsettings.local.json

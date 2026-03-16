@@ -21,4 +21,10 @@
     <ProjectReference Include="..\RoslynTools\RoslynTools.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Update="appsettings.local.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
