@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Authorization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 
@@ -24,14 +24,27 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
         var token = _authService.Token;
         if (string.IsNullOrWhiteSpace(token))
         {
-            var anon = new ClaimsPrincipal(new ClaimsIdentity());
-            return Task.FromResult(new AuthenticationState(anon));
+            return Task.FromResult(Anonymous);
         }
 
-        var handler = new JwtSecurityTokenHandler();
-        var jwt = handler.ReadJwtToken(token);
-        var identity = new ClaimsIdentity(jwt.Claims, "jwt");
-        var user = new ClaimsPrincipal(identity);
-        return Task.FromResult(new AuthenticationState(user));
+        try
+        {
+            var handler = new JwtSecurityTokenHandler();
+            if (!handler.CanReadToken(token))
+                return Task.FromResult(Anonymous);
+            var jwt = handler.ReadJwtToken(token);
+            if (jwt.ValidTo < DateTime.UtcNow)
+                return Task.FromResult(Anonymous);
+            var identity = new ClaimsIdentity(jwt.Claims, "jwt");
+            var user = new ClaimsPrincipal(identity);
+            return Task.FromResult(new AuthenticationState(user));
+        }
+        catch
+        {
+            return Task.FromResult(Anonymous);
+        }
     }
+
+    private static readonly AuthenticationState Anonymous =
+        new(new ClaimsPrincipal(new ClaimsIdentity()));
 }

@@ -1,10 +1,13 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using CodeContextService.API;
 using CodeContextService.Components;
 using CodeContextService.Model;
 using CodeContextService.Services;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Build.Locator;
 using Microsoft.IdentityModel.Tokens;
 using RoslynTools.Analyzer;
@@ -14,13 +17,27 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1) Bind your JWT settings and in-memory users from configuration
+if (builder.Environment.IsDevelopment())
+    builder.Configuration.AddUserSecrets<Program>(optional: true);
+
+// 1) Bind JWT, users, and repo clone options from configuration (env vars override appsettings)
 var jwtSettings = builder.Configuration
     .GetSection("JwtSettings")
     .Get<JwtSettings>()!;
 var users = builder.Configuration
     .GetSection("UserCredentials")
     .Get<List<UserCredential>>()!;
+
+if (builder.Environment.IsProduction() && (jwtSettings.Key.StartsWith("REPLACE_", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(jwtSettings.Key)))
+    throw new InvalidOperationException("In Production, set JwtSettings:Key via environment (e.g. JwtSettings__Key) or Secret Manager. Do not use placeholder from appsettings.json.");
+
+if (builder.Environment.IsProduction() && (users.Count == 0 || users.Any(u => string.IsNullOrWhiteSpace(u.Password) || u.Password.StartsWith("REPLACE_", StringComparison.OrdinalIgnoreCase))))
+    throw new InvalidOperationException("In Production, set at least one user via environment (e.g. UserCredentials__0__Username, UserCredentials__0__Password, UserCredentials__0__Role) or Secret Manager. Do not use placeholder passwords from appsettings.json.");
+
+builder.Services.Configure<RepoCloneOptions>(
+    builder.Configuration.GetSection(RepoCloneOptions.SectionName));
+
+builder.Services.AddHttpContextAccessor();
 
 // 2) Register settings, users, AuthService & AuthStateProvider for DI
 builder.Services.AddSingleton(jwtSettings);
@@ -30,6 +47,7 @@ builder.Services.AddScoped<JwtAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider, JwtAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddAuthorizationCore();
+builder.Services.AddCascadingAuthenticationState();
 
 // 3) Add Authentication & Authorization
 builder.Services
@@ -64,14 +82,66 @@ builder.Services.AddAuthorization(opts =>
         .Build();
 });
 
-// 4) Your existing Razor + Services
+// Rate limiting: protect login from brute force, analyze from spam/DoS
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, _) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+            context.HttpContext.Response.Headers.RetryAfter = ((int)retryAfter.TotalSeconds).ToString(NumberFormatInfo.InvariantInfo);
+        await context.HttpContext.Response.WriteAsync("Too many requests. Try again later.", context.HttpContext.RequestAborted);
+    };
+
+    // Login: strict per-IP to slow brute force (5 attempts per minute per IP)
+    options.AddPolicy("login", context =>
+    {
+        var ip = context.Connection.RemoteIpAddress?.ToString()
+            ?? context.Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',').FirstOrDefault()?.Trim()
+            ?? "unknown";
+        return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
+            AutoReplenishment = true
+        });
+    });
+
+    // Analyze: per-user (expensive clone + Roslyn), 10 per minute per authenticated user
+    options.AddPolicy("analyze", context =>
+    {
+        var key = context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            AutoReplenishment = true
+        });
+    });
+});
+
+// 4) Razor + Services; show detailed circuit errors in Development or when opted in (e.g. CircuitOptions__DetailedErrors=true in Docker)
 builder.Services
     .AddRazorComponents()
     .AddInteractiveServerComponents();
+var circuitDetailedErrors = builder.Environment.IsDevelopment()
+    || string.Equals(builder.Configuration["CircuitOptions:DetailedErrors"], "true", StringComparison.OrdinalIgnoreCase);
+builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(o => o.DetailedErrors = circuitDetailedErrors);
+// Allow larger JS interop payloads (e.g. zip-upload analysis results); default SignalR limit is 32 KB
+builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(o => o.MaximumReceiveMessageSize = 4 * 1024 * 1024); // 4 MB
 
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("github-no-redirect")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        // Avoid opaque redirect loops ("too many redirects or authentication replays").
+        // We handle redirect responses explicitly in GitHubIntegrationService.
+        AllowAutoRedirect = false
+    });
 builder.Services.AddScoped<GitHubIntegrationService>();
 builder.Services.AddScoped<PRAnalyzerService>();
+builder.Services.AddScoped<UploadAnalyzerService>();
 builder.Services.AddScoped(sp =>
     new DefinitionFinderService(msg => Console.WriteLine($"[RF] {msg}"))
 );
@@ -84,7 +154,7 @@ builder.Services.AddSwaggerGen(c =>
     // 1. define the scheme
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "Enter the JWT (no leading “Bearer ”).",
+        Description = "Enter the JWT (no leading ï¿½Bearer ï¿½).",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.Http,
@@ -109,6 +179,20 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+// Allow larger request body for zip upload endpoint only (default Kestrel limit is 30 MB)
+app.UseWhen(
+    ctx => ctx.Request.Path.StartsWithSegments("/api/analyze-upload", StringComparison.OrdinalIgnoreCase),
+    subApp =>
+    {
+        subApp.Use(async (context, next) =>
+        {
+            var feature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (feature != null)
+                feature.MaxRequestBodySize = 524_288_000; // 500 MB
+            await next(context);
+        });
+    });
+
 // 6) Middleware pipeline
 if (!app.Environment.IsDevelopment())
 {
@@ -121,7 +205,9 @@ else
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// Skip HTTPS redirect when running in Docker/container (no HTTPS listener); avoids endless load
+if (!string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true", StringComparison.OrdinalIgnoreCase))
+    app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseAntiforgery();
 
@@ -164,6 +250,7 @@ app.MapPost("/api/auth/login", (LoginRequest req) =>
         expires = expiresAt
     });
 })
+.RequireRateLimiting("login")
 .AllowAnonymous();
 
 // 8) UI registration with Anonymous allowed (so login page loads)
@@ -173,5 +260,13 @@ app.MapRazorComponents<App>()
 
 // 9) Existing API endpoints (protected by fallback)
 app.MapPrAnalyzerEndpoints();
+app.MapUploadAnalyzerEndpoints();
+
+// When in Docker, localhost from the host often hangs (IPv6). Log the URL that works.
+if (string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true", StringComparison.OrdinalIgnoreCase))
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+        Console.WriteLine("[CodeContextService] When opening in a browser from the host, use http://127.0.0.1:8080 (localhost may hang due to IPv6)."));
+}
 
 app.Run();

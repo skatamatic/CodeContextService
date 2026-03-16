@@ -1,5 +1,7 @@
-﻿@inject CodeContextService.Services.AuthService AuthService
+@using Microsoft.AspNetCore.Components.Authorization
+@inject CodeContextService.Services.AuthService AuthService
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 @rendermode InteractiveServer
 
 <div class="top-row ps-3 navbar navbar-dark">
@@ -28,12 +30,21 @@
             </NavLink>
         </div>
     </nav>
+    <div class="mt-auto px-3 pb-3">
+        <AuthorizeView>
+            <Authorized>
+                <span class="text-light small d-block">@context.User.Identity?.Name</span>
+                <button class="btn btn-outline-light btn-sm w-100" @onclick="Logout">Log out</button>
+            </Authorized>
+        </AuthorizeView>
+    </div>
 </div>
 
 @code {
-    void Logout()
+    private async Task Logout()
     {
+        try { await JS.InvokeVoidAsync("clearAuthToken"); } catch (JSException) { /* auth cookie script may be unavailable */ }
         AuthService.Logout();
-        Nav.NavigateTo("login", true);
+        Nav.NavigateTo("login", forceLoad: true);
     }
 }

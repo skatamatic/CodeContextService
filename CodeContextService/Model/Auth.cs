@@ -1,4 +1,4 @@
-﻿namespace CodeContextService.Model;
+namespace CodeContextService.Model;
 
 public record JwtSettings(
     string Key,
@@ -29,5 +29,5 @@ public class LoginRequest
 }
 
 public record LoginResponse(
-    string Token, 
-    DateTime Expires);
+    [property: System.Text.Json.Serialization.JsonPropertyName("token")] string Token,
+    [property: System.Text.Json.Serialization.JsonPropertyName("expires")] DateTime Expires);

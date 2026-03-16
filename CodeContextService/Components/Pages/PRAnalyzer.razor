@@ -1,6 +1,7 @@
-﻿@page "/"
+@page "/"
 @page "/pr-analyze"
 @using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
 @using CodeContextService.Model
 @using CodeContextService.Services
 @using RoslynTools.Analyzer
@@ -295,17 +296,24 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && !CookiesLoaded)
+        try
         {
-            Owner = await JS.InvokeAsync<string>("getCookieByName", "Owner") ?? Owner;
-            Repo = await JS.InvokeAsync<string>("getCookieByName", "Repo") ?? Repo;
-            Token = await JS.InvokeAsync<string>("getCookieByName", "Token") ?? Token;
-            var pr = await JS.InvokeAsync<string>("getCookieByName", "PrNumber");
-            if (int.TryParse(pr, out var prVal)) PrNumber = prVal;
-            CookiesLoaded = true;
-            StateHasChanged();
+            if (firstRender && !CookiesLoaded)
+            {
+                Owner = await JS.InvokeAsync<string>("getCookieByName", "Owner") ?? Owner;
+                Repo = await JS.InvokeAsync<string>("getCookieByName", "Repo") ?? Repo;
+                Token = await JS.InvokeAsync<string>("getCookieByName", "Token") ?? Token;
+                var pr = await JS.InvokeAsync<string>("getCookieByName", "PrNumber");
+                if (int.TryParse(pr, out var prVal)) PrNumber = prVal;
+                CookiesLoaded = true;
+                StateHasChanged();
+            }
+            await JS.InvokeVoidAsync("highlight");
         }
-        await JS.InvokeVoidAsync("highlight");
+        catch (JSException)
+        {
+            // Scripts may not be loaded yet or unavailable; avoid terminating the circuit
+        }
     }
 
     private async Task OnFieldChanged(string field, string? value)

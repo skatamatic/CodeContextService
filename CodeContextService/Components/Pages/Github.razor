@@ -1,5 +1,6 @@
-﻿@page "/github"
+@page "/github"
 @using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
 @using CodeContextService.Services
 @inject GitHubIntegrationService GitHub
 @inject IJSRuntime JS

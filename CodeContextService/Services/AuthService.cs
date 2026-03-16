@@ -1,30 +1,90 @@
-﻿using System.Net.Http.Headers;
+using System.Net.Http.Headers;
 using CodeContextService.Model;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Http;
+using Microsoft.JSInterop;
 
 namespace CodeContextService.Services;
 
 public class AuthService
 {
+    public const string AuthCookieName = "authToken";
+
     private readonly HttpClient _http;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly NavigationManager? _nav;
     private string? _token;
+    private bool _triedRestoreFromCookie;
+    private bool _baseAddressSet;
 
     public event Action AuthenticationStateChanged = () => { };
 
-    // Inject NavigationManager so we know the current origin
-    public AuthService(HttpClient http, NavigationManager nav)
+    public AuthService(HttpClient http, IHttpContextAccessor? httpContextAccessor = null, NavigationManager? nav = null)
     {
-        // Blazor Server’s HttpClient has no BaseAddress by default
-        http.BaseAddress = new Uri(nav.BaseUri);
         _http = http;
+        _httpContextAccessor = httpContextAccessor;
+        _nav = nav;
+        EnsureBaseAddress();
     }
 
-    public string? Token => _token;
+    private void EnsureBaseAddress()
+    {
+        if (_baseAddressSet || _http.BaseAddress != null) return;
+        var baseUri = (string?)null;
+        try
+        {
+            baseUri = _nav?.BaseUri;
+        }
+        catch (InvalidOperationException)
+        {
+            // RemoteNavigationManager not initialized yet (e.g. during Blazor endpoint initial render); fall back to HttpContext
+        }
+        if (string.IsNullOrEmpty(baseUri))
+        {
+            var ctx = _httpContextAccessor?.HttpContext;
+            if (ctx?.Request != null)
+            {
+                var scheme = ctx.Request.Scheme;
+                var host = ctx.Request.Host.Value ?? "localhost";
+                var pathBase = ctx.Request.PathBase.Value?.TrimEnd('/') ?? "";
+                baseUri = $"{scheme}://{host}{pathBase}/";
+            }
+        }
+        if (!string.IsNullOrEmpty(baseUri))
+        {
+            _http.BaseAddress = new Uri(baseUri);
+            _baseAddressSet = true;
+        }
+    }
+
+    public string? Token
+    {
+        get
+        {
+            if (_token != null) return _token;
+            if (_triedRestoreFromCookie) return null;
+            _triedRestoreFromCookie = true;
+            try
+            {
+                var cookieToken = _httpContextAccessor?.HttpContext?.Request?.Cookies[AuthCookieName];
+                if (!string.IsNullOrWhiteSpace(cookieToken))
+                {
+                    _token = cookieToken;
+                    _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+                }
+            }
+            catch
+            {
+                // Cookie/HttpContext may be unavailable in some circuit contexts
+            }
+            return _token;
+        }
+    }
     public bool IsLoggedIn => !string.IsNullOrEmpty(_token);
 
     public async Task<bool> LoginAsync(string username, string password)
     {
-        // now this will go to https://yourhost/api/auth/login
+        EnsureBaseAddress();
         var resp = await _http.PostAsJsonAsync("api/auth/login",
             new LoginRequest(username, password)
         );
@@ -32,9 +92,11 @@ public class AuthService
         if (!resp.IsSuccessStatusCode)
             return false;
 
-        var login = await resp.Content.ReadFromJsonAsync<LoginResponse>()!;
-        _token = login.Token;
+        var login = await resp.Content.ReadFromJsonAsync<LoginResponse>();
+        if (login?.Token == null)
+            return false;
 
+        _token = login.Token;
         _http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _token);
 
@@ -42,9 +104,17 @@ public class AuthService
         return true;
     }
 
+    /// <summary>Write token to cookie so a full page reload (forceLoad) will restore auth. Call before NavigateTo(..., forceLoad: true).</summary>
+    public async Task SetAuthCookieForReloadAsync(IJSRuntime js)
+    {
+        if (_token != null)
+            await js.InvokeVoidAsync("setAuthToken", _token);
+    }
+
     public void Logout()
     {
         _token = null;
+        _triedRestoreFromCookie = false;
         _http.DefaultRequestHeaders.Authorization = null!;
         AuthenticationStateChanged();
     }

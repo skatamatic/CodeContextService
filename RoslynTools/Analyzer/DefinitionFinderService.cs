@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -6,7 +6,7 @@ using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace RoslynTools.Analyzer;
 
-/// <summary>Controls how much commentary is injected.</summary>
+/// <summary>How much commentary is injected into generated code.</summary>
 public enum ExplainMode
 {
     None,
@@ -14,260 +14,325 @@ public enum ExplainMode
     ReasonForInclusionAndExclusion
 }
 
-/// <summary>Produces minimal, depth-limited source definitions for a C# file.</summary>
+/// <summary>
+/// Produces the minimal, depth-limited set of definitions required to compile a C# file.
+/// Adds optional <c>// path:</c> comments that show why each symbol was kept, including line numbers and source text.
+/// Interfaces are emitted unpruned; classes and structs are pruned to actual usage.
+/// </summary>
 public sealed class DefinitionFinderService : FinderServiceBase, IDefinitionFinderService
 {
     public DefinitionFinderService(Action<string> log) : base(log) { }
 
-    #region PUBLIC CONTRACT
+    #region Public API
 
     public async Task<IReadOnlyCollection<DefinitionResult>> FindAllDefinitionsAsync(string file, int depth)
     {
         if (depth < 0) throw new ArgumentOutOfRangeException(nameof(depth));
         var solution = await GetSolutionAsync(file);
-        var doc = LocateDocument(solution, file)
-                       ?? throw new FileNotFoundException(file);
-        var acc = new Dictionary<string, DefinitionResult>();
+        var doc = LocateDocument(solution, file) ?? throw new FileNotFoundException(file);
+        var acc = new Dictionary<string, DefinitionResult>(StringComparer.OrdinalIgnoreCase);
         await WalkFullAsync(solution, doc, depth, acc);
         return acc.Values.ToArray();
     }
 
     public async Task<DefinitionResult?> FindSingleClassDefinitionAsync(string anyFile, string className)
     {
+        if (string.IsNullOrWhiteSpace(className)) throw new ArgumentException("Class name required.", nameof(className));
         var solution = await GetSolutionAsync(anyFile);
-        var sym = await LocateClassSymbolAsync(solution, className);
-        if (sym is null) return null;
+        var symbol = await LocateClassSymbolAsync(solution, className);
+        if (symbol == null) return null;
 
-        var loc = sym.Locations.First(l => l.IsInSource);
+        var loc = symbol.Locations.FirstOrDefault(l => l.IsInSource);
+        if (loc == null) return null;
         var node = (await loc.SourceTree!.GetRootAsync()).FindNode(loc.SourceSpan);
-        return new DefinitionResult
-        {
-            File = loc.SourceTree.FilePath,
-            Definitions =
-            {
-                [loc.SourceTree.FilePath] = BuildDefinition(sym, node)
-            }
-        };
+        var file = loc.SourceTree.FilePath ?? "(no path)";
+        var result = new DefinitionResult { File = file };
+        result.Definitions[file] = BuildDefinition(symbol, node);
+        return result;
     }
 
     public Task<IReadOnlyCollection<DefinitionResult>> FindMinimalDefinitionsAsync(
         string file, int depth, ExplainMode explain = ExplainMode.None)
-        => RunMinimalAsync(file, depth, explain);
+        => WalkMinimalAsync(file, depth, explain);
 
     #endregion
 
-    #region FULL WALK (unpruned)
+    #region Full Walk (unpruned)
 
     private async Task WalkFullAsync(
-        Solution solution, Document doc, int maxDepth,
-        IDictionary<string, DefinitionResult> acc, int level = 0)
+        Solution solution,
+        Document document,
+        int maxDepth,
+        IDictionary<string, DefinitionResult> acc,
+        int level = 0)
     {
-        if (level > maxDepth || doc.FilePath is null) return;
+        if (level > maxDepth || document.FilePath == null) return;
 
-        var model = await doc.GetSemanticModelAsync();
-        var root = await model!.SyntaxTree.GetRootAsync();
+        var model = await document.GetSemanticModelAsync();
+        if (model == null) return;
 
+        var root = await model.SyntaxTree.GetRootAsync();
         foreach (var node in root.DescendantNodes())
         {
             var type = (model.GetDeclaredSymbol(node) ?? model.GetSymbolInfo(node).Symbol) as INamedTypeSymbol;
-            if (type is null || IsExcluded(type)) continue;
+            if (type == null || IsExcluded(type)) continue;
 
-            var src = await SymbolFinder.FindSourceDefinitionAsync(type, solution) as INamedTypeSymbol ?? type;
-            foreach (var loc in src.Locations.Where(l => l.IsInSource))
+            var srcDef = await SymbolFinder.FindSourceDefinitionAsync(type, solution) as INamedTypeSymbol ?? type;
+            foreach (var loc in srcDef.Locations.Where(l => l.IsInSource))
             {
-                var file = loc.SourceTree!.FilePath;
+                var file = loc.SourceTree!.FilePath ?? "(no path)";
                 var decl = (await loc.SourceTree.GetRootAsync()).FindNode(loc.SourceSpan);
 
-                var def = acc.TryGetValue(file, out var r) ? r : acc[file] = new() { File = file };
-                var key = $"{file}:{type.ToDisplayString()}";
+                if (!acc.TryGetValue(file, out var def))
+                    def = acc[file] = new DefinitionResult { File = file };
+
+                var typeDisplay = type.ToDisplayString();
+                var key = $"{file}:{typeDisplay}";
                 if (def.Definitions.ContainsKey(key)) continue;
 
                 def.Definitions[key] = BuildDefinition(type, decl);
-                await WalkFullAsync(solution, solution.GetDocument(loc.SourceTree)!, maxDepth, acc, level + 1);
+                var nextDoc = solution.GetDocument(loc.SourceTree);
+                if (nextDoc != null)
+                    await WalkFullAsync(solution, nextDoc, maxDepth, acc, level + 1);
             }
         }
     }
 
     #endregion
 
-    #region MINIMAL WALK WITH EXPLANATIONS
+    #region Minimal Walk with Explanations
 
     private sealed record MemberInfo(ISymbol Symbol, HashSet<string> Paths);
     private sealed record Frontier(INamedTypeSymbol Type, int DepthLeft, string Path);
 
-    private async Task<IReadOnlyCollection<DefinitionResult>> RunMinimalAsync(
-        string file, int maxDepth, ExplainMode explain)
+    private async Task<IReadOnlyCollection<DefinitionResult>> WalkMinimalAsync(
+        string file, int depth, ExplainMode explain)
     {
-        if (maxDepth < 0) throw new ArgumentOutOfRangeException(nameof(maxDepth));
+        if (depth < 0) throw new ArgumentOutOfRangeException(nameof(depth));
 
         var solution = await GetSolutionAsync(file);
-        var rootDoc = LocateDocument(solution, file)
-                       ?? throw new FileNotFoundException(file);
+        var rootDoc = LocateDocument(solution, file) ?? throw new FileNotFoundException(file);
 
         var keep = new Dictionary<INamedTypeSymbol, Dictionary<ISymbol, MemberInfo>>(SymbolEqualityComparer.Default);
         var seen = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
         var queue = new Queue<Frontier>();
 
-        // seed with every type declared in the source file
-        await foreach (var rootType in GetDeclaredTypesAsync(rootDoc))
+        // Seed: every type declared in the source file
+        await foreach (var rt in GetDeclaredTypesAsync(rootDoc))
         {
-            var rootPath = $"{Path.GetFileName(file)}::{rootType.Name}";
-            queue.Enqueue(new(rootType, maxDepth, rootPath));
-
-            keep[rootType] = new(SymbolEqualityComparer.Default)
-            {
-                [rootType] = new(rootType, new() { rootPath }) // type-level path
-            };
-
-            foreach (var m in rootType.GetMembers())
-                keep[rootType][m] = new(m, new() { $"{rootPath} (declared in source file)" });
+            var rootPath = $"{Path.GetFileName(file)}::{rt.Name}";
+            queue.Enqueue(new(rt, depth, rootPath));
+            var bucket = keep[rt] = new(SymbolEqualityComparer.Default);
+            bucket[rt] = new(rt, new() { rootPath });
+            foreach (var m in rt.GetMembers())
+                bucket[m] = new(m, new() { $"{rootPath} (declared in source file)" });
         }
 
-        // BFS across reference graph
-        while (queue.TryDequeue(out var f))
+        // BFS traversal
+        while (queue.TryDequeue(out var front))
         {
-            if (!seen.Add(f.Type)) continue;
+            if (!seen.Add(front.Type)) continue;
 
-            foreach (var loc in f.Type.Locations.Where(l => l.IsInSource))
+            foreach (var loc in front.Type.Locations.Where(l => l.IsInSource))
             {
                 var doc = solution.GetDocument(loc.SourceTree)!;
                 var model = await doc.GetSemanticModelAsync();
-                var root = await loc.SourceTree.GetRootAsync();
-                var node = GetTypeNode(root, loc);
 
-                foreach (var sn in node.DescendantNodes())
+                if (model == null || loc.SourceTree == null)
+                    continue;
+
+                var root = await loc.SourceTree.GetRootAsync();
+                var typeNode = GetTypeNode(root, loc);
+
+                foreach (var n in typeNode.DescendantNodes())
                 {
-                    if (model.GetDeclaredSymbol(sn) != null) continue;  // ignore declarations
-                    var sym = model.GetSymbolInfo(sn).Symbol;
-                    if (sym is null || !IsRealUse(sn, sym) || IsExcluded(sym)) continue;
+                    if (model.GetDeclaredSymbol(n) != null) continue;
+                    var sym = model.GetSymbolInfo(n).Symbol;
+                    if (sym == null || IsExcluded(sym) || !IsRealUse(n, sym)) continue;
 
                     var owner = sym is INamedTypeSymbol nt ? nt : sym.ContainingType;
-                    if (owner is null) continue;
+                    if (owner == null) continue;
+
+                    var tree = n.SyntaxTree!;
+                    var textLines = await tree.GetTextAsync();
+                    var lineSpan = tree.GetLineSpan(n.Span);
+                    var lineNum = lineSpan.StartLinePosition.Line + 1;
+                    var text = textLines.Lines[lineNum - 1].ToString().Trim();
 
                     var hop = $"{Path.GetFileName(owner.Locations[0].SourceTree!.FilePath)}::{owner.Name}::{sym.Name}";
-                    var fullPath = $"{f.Path}->{hop}";
+                    var path = $"{front.Path}->{hop} @({lineNum}): {text}";
 
-                    AddReason(owner, sym, fullPath);
+                    if (sym is INamedTypeSymbol ts)
+                        AddReason(ts, ts, path);
+                    else
+                    {
+                        AddReason(owner, sym, path);
+                        AddInterfaceContracts(owner, sym, path);
+                    }
 
-                    if (!SymbolEqualityComparer.Default.Equals(owner, f.Type) && f.DepthLeft > 0)
-                        queue.Enqueue(new(owner, f.DepthLeft - 1, fullPath));
+                    if (!SymbolEqualityComparer.Default.Equals(owner, front.Type) && front.DepthLeft > 0)
+                        queue.Enqueue(new(owner, front.DepthLeft - 1, path));
                 }
             }
 
-            IncludeMandatoryMembers(f.Type);
+            IncludeMandatory(front.Type);
         }
 
         return await EmitAsync(solution, keep, explain);
 
-        // helpers --------------------------------------------------------------
-        void AddReason(INamedTypeSymbol t, ISymbol s, string path)
+        // Helpers
+
+        void AddReason(INamedTypeSymbol t, ISymbol s, string p)
         {
             var bucket = keep.TryGetValue(t, out var b) ? b : keep[t] = new(SymbolEqualityComparer.Default);
-
             if (!bucket.TryGetValue(s, out var mi))
                 mi = bucket[s] = new(s, new());
-            mi.Paths.Add(path);
+            mi.Paths.Add(p);
 
-            // ensure the type itself has trivia
             if (!bucket.TryGetValue(t, out var ti))
                 ti = bucket[t] = new(t, new());
-            ti.Paths.Add(path);
+            ti.Paths.Add(p);
         }
 
-        void IncludeMandatoryMembers(INamedTypeSymbol t)
+        void IncludeMandatory(INamedTypeSymbol t)
         {
-            foreach (var cctor in t.StaticConstructors)
-                AddReason(t, cctor, $"{t.Name}::(static ctor)");
+            foreach (var cc in t.StaticConstructors)
+                AddReason(t, cc, $"{t.Name}::(static ctor)");
             foreach (var fld in t.GetMembers().OfType<IFieldSymbol>()
-                                   .Where(f => f.IsConst || (f.IsStatic && f.IsReadOnly)))
+                                 .Where(f => f.IsConst || (f.IsStatic && f.IsReadOnly)))
                 AddReason(t, fld, $"{t.Name}::{fld.Name} (const/static)");
+        }
+
+        void AddInterfaceContracts(INamedTypeSymbol classType, ISymbol member, string p)
+        {
+            if (classType.TypeKind is not (TypeKind.Class or TypeKind.Struct)) return;
+            foreach (var iface in classType.AllInterfaces)
+            {
+                foreach (var im in iface.GetMembers(member.Name))
+                {
+                    var impl = classType.FindImplementationForInterfaceMember(im);
+                    if (SymbolEqualityComparer.Default.Equals(impl, member))
+                        AddReason(iface, im, $"{p} (implements {iface.Name})");
+                }
+            }
         }
     }
 
-    /// <summary>True if <paramref name="node"/> represents an actual use of <paramref name="symbol"/>.</summary>
+    #endregion
+
+    #region Real-Use Detector
+
     private static bool IsRealUse(SyntaxNode node, ISymbol symbol)
     {
-        // calls, property/field/event access
-        if (node.Parent is MemberAccessExpressionSyntax or InvocationExpressionSyntax)
+        if (node.Parent is MemberDeclarationSyntax md &&
+            md.ChildTokens().Any(t => t == node.GetFirstToken()))
+            return false;
+        if (node.Parent is BaseTypeSyntax or VariableDeclaratorSyntax or ParameterSyntax)
+            return false;
+
+        if (symbol.Kind == SymbolKind.Method)
+        {
+            if (node.Parent is MemberAccessExpressionSyntax mae &&
+                mae.Parent is InvocationExpressionSyntax)
+                return true;
+            if (node.Ancestors().OfType<InvocationExpressionSyntax>().Any())
+                return true;
+        }
+
+        if (symbol.Kind is SymbolKind.Property or SymbolKind.Field or SymbolKind.Event)
+            return node.Parent is MemberAccessExpressionSyntax
+                || node is IdentifierNameSyntax
+                || node.Parent is AssignmentExpressionSyntax;
+
+        if (symbol.Kind is SymbolKind.Local or SymbolKind.Parameter)
+            return node is IdentifierNameSyntax;
+
+        if (symbol is INamedTypeSymbol &&
+            node is IdentifierNameSyntax or QualifiedNameSyntax or GenericNameSyntax)
             return true;
 
-        // identifier on its own (lhs/rhs)
-        if (node is IdentifierNameSyntax id &&
-            symbol.Kind is SymbolKind.Property or SymbolKind.Field or SymbolKind.Event or SymbolKind.Local or SymbolKind.Parameter)
-            return true;
-
-        // event hookup / assignment
-        if (node.Parent is AssignmentExpressionSyntax) return true;
-
-        // constructor call counts only for .ctor, not for the type itself
         if (node is ObjectCreationExpressionSyntax)
-            return symbol.Kind == SymbolKind.Method; // .ctor
+            return symbol.Kind == SymbolKind.Method || symbol is INamedTypeSymbol;
+
+        if (node.Parent is AssignmentExpressionSyntax) return true;
 
         return false;
     }
 
     #endregion
 
-    #region EMIT
+    #region Emit Helpers
 
     private static async Task<IReadOnlyCollection<DefinitionResult>> EmitAsync(
         Solution solution,
         Dictionary<INamedTypeSymbol, Dictionary<ISymbol, MemberInfo>> keep,
         ExplainMode explain)
     {
-        var results = new Dictionary<string, DefinitionResult>();
+        var results = new Dictionary<string, DefinitionResult>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (type, members) in keep)
         {
             var loc = type.Locations.First(l => l.IsInSource);
             var doc = solution.GetDocument(loc.SourceTree)!;
             var model = await doc.GetSemanticModelAsync();
+
+            if (model == null || loc.SourceTree == null)
+                continue;
+
             var root = await loc.SourceTree.GetRootAsync();
             var node = GetTypeNode(root, loc);
 
-            SyntaxNode rendered = node switch
+            SyntaxNode rendered;
+            if (node is InterfaceDeclarationSyntax ifaceDecl)
             {
-                TypeDeclarationSyntax td => RenderComplexType(td, members, model, explain),
-                _ => AddTrivia(node, type, members, explain)
-                                            .NormalizeWhitespace(eol: Environment.NewLine)
-            };
+                rendered = AddTrivia(ifaceDecl, type, members, explain)
+                           .NormalizeWhitespace(eol: Environment.NewLine);
+            }
+            else if (node is TypeDeclarationSyntax td)
+            {
+                rendered = RenderComplex(td, members, model, explain);
+            }
+            else
+            {
+                rendered = AddTrivia(node, type, members, explain)
+                           .NormalizeWhitespace(eol: Environment.NewLine);
+            }
 
-            var file = loc.SourceTree.FilePath;
-            if (!results.TryGetValue(file, out var def)) def = results[file] = new() { File = file };
+            var file = loc.SourceTree.FilePath ?? "(no path)";
+            if (!results.TryGetValue(file, out var def))
+                def = results[file] = new DefinitionResult { File = file };
             def.Definitions[$"{file}:{type.ToDisplayString()}"] = BuildDefinition(type, rendered);
         }
 
         return results.Values.ToArray();
     }
 
-    private static SyntaxNode RenderComplexType(
+    private static SyntaxNode RenderComplex(
         TypeDeclarationSyntax original,
         Dictionary<ISymbol, MemberInfo> map,
         SemanticModel model,
         ExplainMode explain)
     {
-        // capture (node,symbol) before mutation
-        var memberTuples = original.Members
-                                   .Select(m => (Node: m, Sym: model.GetDeclaredSymbol(m)!))
-                                   .ToList();
+        var tuples = original.Members
+                             .Select(m => (Node: m, Sym: model.GetDeclaredSymbol(m)!))
+                             .ToList();
 
         original = AddTrivia(original, model.GetDeclaredSymbol(original)!, map, explain);
-
         var keepSet = map.Keys.ToHashSet(SymbolEqualityComparer.Default);
 
-        var kept = memberTuples
-                   .Where(t => keepSet.Contains(t.Sym))
-                   .Select(t => AddTrivia(t.Node, t.Sym, map, explain))
-                   .ToList();
+        var kept = tuples.Where(t => keepSet.Contains(t.Sym))
+                         .Select(t => AddTrivia(t.Node, t.Sym, map, explain))
+                         .ToList();
 
         if (explain == ExplainMode.ReasonForInclusionAndExclusion)
-            original = AppendExclusionStub(original,
-                                           memberTuples.Where(t => !keepSet.Contains(t.Sym))
-                                                       .Select(t => t.Node),
-                                           model);
+            original = AppendExclusionStub(
+                original,
+                tuples.Where(t => !keepSet.Contains(t.Sym)).Select(t => t.Node),
+                model);
 
-        return original.WithMembers(SyntaxFactory.List<MemberDeclarationSyntax>(kept))
-                       .NormalizeWhitespace(eol: Environment.NewLine);
+        return original.WithMembers(
+            SyntaxFactory.List<MemberDeclarationSyntax>(kept))
+            .NormalizeWhitespace(eol: Environment.NewLine);
     }
 
     private static T AddTrivia<T>(
@@ -275,11 +340,13 @@ public sealed class DefinitionFinderService : FinderServiceBase, IDefinitionFind
         Dictionary<ISymbol, MemberInfo> map,
         ExplainMode explain) where T : SyntaxNode
     {
-        if (explain == ExplainMode.None || !map.TryGetValue(sym, out var mi) || mi.Paths.Count == 0)
+        if (explain == ExplainMode.None
+            || !map.TryGetValue(sym, out var info)
+            || info.Paths.Count == 0)
             return node;
 
-        var trivia = SyntaxFactory.ParseLeadingTrivia(
-            string.Join(Environment.NewLine, mi.Paths.Select(p => $"// path: {p}")) + Environment.NewLine);
+        var text = string.Join(Environment.NewLine, info.Paths.Select(p => $"// path: {p}"));
+        var trivia = SyntaxFactory.ParseLeadingTrivia(text + Environment.NewLine);
         return node.WithLeadingTrivia(trivia.Concat(node.GetLeadingTrivia()));
     }
 
@@ -289,28 +356,27 @@ public sealed class DefinitionFinderService : FinderServiceBase, IDefinitionFind
         SemanticModel model)
     {
         var list = pruned.ToList();
-        if (list.Count == 0) return tds;
+        if (!list.Any()) return tds;
 
         var sb = new StringBuilder();
         foreach (var m in list)
         {
-            var sig = model.GetDeclaredSymbol(m)?.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat);
+            var sig = model.GetDeclaredSymbol(m)?
+                          .ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat);
             sb.AppendLine("// excluded – no path from source file");
-            if (sig == null)
-                sb.AppendLine("// sig null");
-            else
-                sb.AppendLine("// " + sig);
+            sb.AppendLine("// " + sig);
         }
 
         var brace = tds.CloseBraceToken;
-        var trail = brace.TrailingTrivia.InsertRange(0,
-                      SyntaxFactory.ParseTrailingTrivia(Environment.NewLine + sb));
+        var trail = brace.TrailingTrivia.InsertRange(
+            0,
+            SyntaxFactory.ParseTrailingTrivia(Environment.NewLine + sb));
         return tds.WithCloseBraceToken(brace.WithTrailingTrivia(trail));
     }
 
     #endregion
 
-    #region UTILS
+    #region Utilities
 
     private static SyntaxNode GetTypeNode(SyntaxNode root, Location loc)
     {
@@ -320,8 +386,8 @@ public sealed class DefinitionFinderService : FinderServiceBase, IDefinitionFind
             TypeDeclarationSyntax t => t,
             EnumDeclarationSyntax e => e,
             DelegateDeclarationSyntax d => d,
-            _ => n.AncestorsAndSelf().First(a =>
-                    a is TypeDeclarationSyntax or EnumDeclarationSyntax or DelegateDeclarationSyntax)
+            _ => n.AncestorsAndSelf()
+                  .First(a => a is TypeDeclarationSyntax or EnumDeclarationSyntax or DelegateDeclarationSyntax)
         };
     }
 
@@ -330,8 +396,8 @@ public sealed class DefinitionFinderService : FinderServiceBase, IDefinitionFind
         var model = await doc.GetSemanticModelAsync();
         var root = await model!.SyntaxTree.GetRootAsync();
         foreach (var t in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
-            if (model.GetDeclaredSymbol(t) is INamedTypeSymbol sym)
-                yield return sym;
+            if (model.GetDeclaredSymbol(t) is INamedTypeSymbol s)
+                yield return s;
     }
 
     private static async Task<INamedTypeSymbol?> LocateClassSymbolAsync(
@@ -339,9 +405,10 @@ public sealed class DefinitionFinderService : FinderServiceBase, IDefinitionFind
     {
         foreach (var proj in solution.Projects)
         {
-            var decls = await SymbolFinder.FindDeclarationsAsync(proj, className, ignoreCase: false, SymbolFilter.Type);
+            var decls = await SymbolFinder.FindDeclarationsAsync(
+                proj, className, ignoreCase: false, SymbolFilter.Type);
             var hit = decls.OfType<INamedTypeSymbol>()
-                             .FirstOrDefault(s => s.Name.Equals(className, StringComparison.Ordinal));
+                           .FirstOrDefault(s => s.Name.Equals(className, StringComparison.Ordinal));
             if (hit != null) return hit;
         }
         return null;

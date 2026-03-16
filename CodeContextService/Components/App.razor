@@ -1,4 +1,4 @@
-﻿@using CodeContextService.Components.Layout
+@using CodeContextService.Components.Layout
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Routing
 @using CodeContextService.Components
@@ -24,10 +24,14 @@
                 <AuthorizeRouteView RouteData="@routeData"
                                     DefaultLayout="@typeof(MainLayout)">
                     <NotAuthorized>
-                        <RedirectToLogin />
+                        <LayoutView Layout="@typeof(LoginLayout)">
+                            <RedirectToLogin />
+                        </LayoutView>
                     </NotAuthorized>
                     <Authorizing>
-                        <p>Checking authentication…</p>
+                        <LayoutView Layout="@typeof(LoginLayout)">
+                            <p class="text-muted mb-0">Checking authentication…</p>
+                        </LayoutView>
                     </Authorizing>
                 </AuthorizeRouteView>
             </Found>
@@ -39,6 +43,7 @@
         </Router>
     </CascadingAuthenticationState>
 
+    <script src="authCookie.js"></script>
     <script src="_framework/blazor.server.js"></script>
 </body>
 </html>

@@ -1,0 +1,30 @@
+# Git and IDE
+.git
+.gitignore
+.vs
+.vscode
+*.user
+*.suo
+
+# Build and runtime
+**/bin
+**/obj
+**/out
+**/logs
+**/.dockerignore
+
+# Docs and deployment plan (keep image lean)
+*.md
+!CodeContextService/README.md
+
+# Test and tooling
+**/Dockerfile*
+**/docker-compose*
+**/*.Tests
+**/test
+**/tests
+
+# OS and misc
+**/Thumbs.db
+**/.DS_Store
+**/node_modules

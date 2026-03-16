@@ -1,34 +1,36 @@
-﻿@page "/login"
+@page "/login"
+@layout LoginLayout
 @using CodeContextService.Model
 @using Microsoft.AspNetCore.Authorization
 @attribute [AllowAnonymous]
 @inject CodeContextService.Services.AuthService AuthService
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 @rendermode InteractiveServer
 
-<h3>Log in</h3>
+<h3 class="mb-4">Log in</h3>
 
-<div class="mb-3">
-    <label for="user">Username</label>
-    <input id="user"
-           class="form-control"
-           @bind="_model.Username"
-           @bind:event="oninput" />
-</div>
+<form @onsubmit="HandleLoginSubmit" @onsubmit:preventDefault="true">
+    <div class="mb-3">
+        <label for="user">Username</label>
+        <input id="user"
+               class="form-control"
+               @bind="_model.Username"
+               @bind:event="oninput" />
+    </div>
 
-<div class="mb-3">
-    <label for="pass">Password</label>
-    <input id="pass"
-           type="password"
-           class="form-control"
-           @bind="_model.Password"
-           @bind:event="oninput" />
-</div>
+    <div class="mb-3">
+        <label for="pass">Password</label>
+        <input id="pass"
+               type="password"
+               class="form-control"
+               @bind="_model.Password"
+               @bind:event="oninput" />
+    </div>
 
-<button type="button"
-        class="btn btn-primary"
-        @onclick="HandleLogin"
-        disabled="@_isLoading">
+    <button type="submit"
+            class="btn btn-primary"
+            disabled="@_isLoading">
     @if (_isLoading)
     {
         <span>Logging in…</span>
@@ -37,7 +39,8 @@
     {
         <span>Log In</span>
     }
-</button>
+    </button>
+</form>
 
 @if (!string.IsNullOrEmpty(_error))
 {
@@ -49,11 +52,10 @@
     private bool _isLoading;
     private string? _error;
 
-    private async Task HandleLogin()
+    private async Task HandleLoginSubmit()
     {
         _error = null;
 
-        // quick client‐side check
         if (string.IsNullOrWhiteSpace(_model.Username) ||
             string.IsNullOrWhiteSpace(_model.Password))
         {
@@ -71,7 +73,9 @@
 
             if (success)
             {
-                Nav.NavigateTo("/pr-analyze");
+                // Persist token in cookie and full reload so new circuit starts with auth (avoids AuthorizeRouteView stale state)
+                await AuthService.SetAuthCookieForReloadAsync(JS);
+                Nav.NavigateTo("/pr-analyze", forceLoad: true);
             }
             else
             {

@@ -1,0 +1,13 @@
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<div class="p-4">
+    <p class="text-muted">Redirecting to login…</p>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Nav.NavigateTo("/login", forceLoad: false);
+    }
+}

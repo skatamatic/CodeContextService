@@ -16,6 +16,16 @@ a, .btn-link {
   box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
 }
 
+.sidebar .nav-scrollable {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.sidebar .nav-scrollable > nav {
+    flex: 1;
+}
+
 .content {
     padding-top: 1.1rem;
 }
