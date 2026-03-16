@@ -1,4 +1,4 @@
-﻿namespace CodeContextService.Services;
+namespace CodeContextService.Services;
 
 public class SourceControlConnectionInfo
 {
@@ -8,5 +8,7 @@ public class SourceControlConnectionInfo
     public string Owner { get; init; }
     public string Project { get; init; }
     public string Repo { get; init; }
+    public string? CollectionUri { get; init; }
+    public string? OrganizationUrl { get; init; }
 
 }

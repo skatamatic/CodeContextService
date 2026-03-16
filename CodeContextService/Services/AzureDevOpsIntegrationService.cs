@@ -1,4 +1,4 @@
-﻿using CodeContextService.Model;
+using CodeContextService.Model;
 using LibGit2Sharp;
 using System.Net.Http.Headers;
 using System.Text;
@@ -29,10 +29,79 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
         return client;
     }
 
+    private static string NormalizeAdoOrgBaseUrl(SourceControlConnectionInfo cs)
+    {
+        var candidates = new[]
+        {
+            cs.OrganizationUrl,
+            cs.CollectionUri,
+            cs.Org,
+            cs.Owner
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (TryNormalizeAdoOrgBaseUrlCandidate(candidate, out var normalized))
+                return normalized;
+        }
+
+        throw new InvalidOperationException("Azure DevOps org/collection URL is required.");
+    }
+
+    private static bool TryNormalizeAdoOrgBaseUrlCandidate(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        var raw = (value ?? string.Empty).Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        // Accept host/path without scheme (e.g. dev.azure.com/org or mdt-software.visualstudio.com).
+        if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+            (raw.Contains(".visualstudio.com", StringComparison.OrdinalIgnoreCase) ||
+             raw.StartsWith("dev.azure.com/", StringComparison.OrdinalIgnoreCase)))
+        {
+            raw = $"https://{raw}";
+        }
+
+        if (raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            var uri = new Uri(raw);
+            var host = (uri.Host ?? string.Empty).ToLowerInvariant();
+
+            if (host == "dev.azure.com")
+            {
+                var segs = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (segs.Length > 0)
+                {
+                    normalized = $"https://dev.azure.com/{segs[0]}";
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (host.EndsWith(".visualstudio.com", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = $"{uri.Scheme}://{uri.Host}";
+                return true;
+            }
+
+            normalized = $"{uri.Scheme}://{uri.Host}";
+            return true;
+        }
+
+        // Plain organization string (e.g., "mdt-software").
+        normalized = $"https://dev.azure.com/{raw}";
+        return true;
+    }
+
     public async Task<bool> ValidateTokenAsync(SourceControlConnectionInfo cs)
     {
         var client = CreateClient(cs);
-        var resp = await client.GetAsync($"{cs.Org}/_apis/projects?api-version=2.0");
+        var orgBaseUrl = NormalizeAdoOrgBaseUrl(cs);
+        var resp = await client.GetAsync($"{orgBaseUrl}/_apis/projects?api-version=7.0");
         return resp.IsSuccessStatusCode;
     }
 
@@ -133,7 +202,8 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
 
     public async Task<string> CloneRepository(SourceControlConnectionInfo cs, string? branch = null)
     {
-        var url = $"https://{cs.Org}/{cs.Project}/_git/{cs.Repo}";
+        var orgBaseUrl = NormalizeAdoOrgBaseUrl(cs);
+        var url = $"{orgBaseUrl}/{cs.Project}/_git/{cs.Repo}";
         var destDir = Path.Combine(Path.GetTempPath(), $"{cs.Repo}-{Guid.NewGuid()}");
 
         var co = new CloneOptions();
@@ -149,7 +219,8 @@ public class AzureDevOpsIntegrationService : ISourceControlIntegrationService
     public async Task<UnifiedDiff> GetUnifiedDiff(SourceControlConnectionInfo cs, int prNumber)
     {
         var client = CreateClient(cs);
-        var url = $"https://{cs.Org}/{cs.Project}/_apis/git/repositories/{cs.Repo}/pullRequests/{prNumber}?api-version=7.0";
+        var orgBaseUrl = NormalizeAdoOrgBaseUrl(cs);
+        var url = $"{orgBaseUrl}/{cs.Project}/_apis/git/repositories/{cs.Repo}/pullRequests/{prNumber}?api-version=7.0";
         _log.LogInformation("Fetching PR from {Url}", url);
 
         var resp = await client.GetAsync(url);
